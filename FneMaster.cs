@@ -1136,24 +1136,27 @@ namespace fnecore
             CancellationToken ct = maintainenceCancelToken.Token;
             while (!abortListening)
             {
-                // check to see if any peers have been quiet (no ping) longer than allowed
-                List<uint> peersToRemove = new List<uint>();
-                foreach (KeyValuePair<uint, PeerInformation> kvp in peers)
+                lock (peers)
                 {
-                    uint peerId = kvp.Key;
-                    PeerInformation peer = kvp.Value;
-
-                    DateTime dt = peer.LastPing.AddSeconds(PingTime * MaxMissed);
-                    if (dt < DateTime.Now)
+                    // check to see if any peers have been quiet (no ping) longer than allowed
+                    List<uint> peersToRemove = new List<uint>();
+                    foreach (KeyValuePair<uint, PeerInformation> kvp in peers)
                     {
-                        Log(LogLevel.INFO, $"({systemName}) PEER {peerId} has timed out");
-                        peersToRemove.Add(peerId);
-                    }
-                }
+                        uint peerId = kvp.Key;
+                        PeerInformation peer = kvp.Value;
 
-                // remove any peers
-                foreach (uint peerId in peersToRemove)
-                    peers.Remove(peerId);
+                        DateTime dt = peer.LastPing.AddSeconds(PingTime * MaxMissed);
+                        if (dt < DateTime.Now)
+                        {
+                            Log(LogLevel.INFO, $"({systemName}) PEER {peerId} has timed out");
+                            peersToRemove.Add(peerId);
+                        }
+                    }
+
+                    // remove any peers
+                    foreach (uint peerId in peersToRemove)
+                        peers.Remove(peerId);
+                }
 
                 try
                 {
