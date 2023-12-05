@@ -252,7 +252,7 @@ namespace fnecore.P25
 
                             block.GetData(ref data, dataOffset);
                             dataOffset += (Header.Format == P25Defines.PDU_FMT_CONFIRMED) ? P25Defines.P25_PDU_CONFIRMED_DATA_LENGTH_BYTES : P25Defines.P25_PDU_UNCONFIRMED_LENGTH_BYTES;
-                            UserDataLength += dataOffset;
+                            UserDataLength = dataOffset;
 
                             dataBlockCnt++;
 
