@@ -137,6 +137,54 @@ namespace fnecore.P25
 
         public const byte P25_MI_LENGTH = 9;
 
+        public const byte P25_PDU_HEADER_LENGTH_BYTES = 12;
+        public const byte P25_PDU_CONFIRMED_LENGTH_BYTES = 18;
+        public const byte P25_PDU_CONFIRMED_DATA_LENGTH_BYTES = 16;
+        public const byte P25_PDU_UNCONFIRMED_LENGTH_BYTES = 12;
+
+        // PDU Format Type(s)
+        public const byte PDU_FMT_RSP = 0x03;
+        public const byte PDU_FMT_UNCONFIRMED = 0x15;
+        public const byte PDU_FMT_CONFIRMED = 0x16;
+        public const byte PDU_FMT_AMBT = 0x17;
+
+        // PDU SAP
+        public const byte PDU_SAP_USER_DATA = 0x00;
+        public const byte PDU_SAP_ENC_USER_DATA = 0x01;
+
+        public const byte PDU_SAP_PACKET_DATA = 0x04;
+
+        public const byte PDU_SAP_ARP = 0x05;
+
+        public const byte PDU_SAP_SNDCP_CTRL_DATA = 0x06;
+
+        public const byte PDU_SAP_EXT_ADDR = 0x1F;
+
+        public const byte PDU_SAP_REG = 0x20;
+
+        public const byte PDU_SAP_UNENC_KMM = 0x28;
+        public const byte PDU_SAP_ENC_KMM = 0x29;
+
+        public const byte PDU_SAP_TRUNK_CTRL = 0x3D;
+
+        // PDU ACK Class
+        public const byte PDU_ACK_CLASS_ACK = 0x00;
+        public const byte PDU_ACK_CLASS_NACK = 0x01;
+        public const byte PDU_ACK_CLASS_ACK_RETRY = 0x02;
+
+        // PDU ACK Type(s)
+        public const byte PDU_ACK_TYPE_RETRY = 0x00;
+
+        public const byte PDU_ACK_TYPE_ACK = 0x01;
+
+        public const byte PDU_ACK_TYPE_NACK_ILLEGAL = 0x00;      // Illegal Format
+        public const byte PDU_ACK_TYPE_NACK_PACKET_CRC = 0x01;   // Packet CRC
+        public const byte PDU_ACK_TYPE_NACK_MEMORY_FULL = 0x02;  // Memory Full
+        public const byte PDU_ACK_TYPE_NACK_SEQ = 0x03;          // Out of logical sequence FSN
+        public const byte PDU_ACK_TYPE_NACK_UNDELIVERABLE = 0x04;// Undeliverable
+        public const byte PDU_ACK_TYPE_NACK_OUT_OF_SEQ = 0x05;   // Out of sequence, N(S) != V(R) or V(R) + 1
+        public const byte PDU_ACK_TYPE_NACK_INVL_USER = 0x06;    // Invalid User disallowed by the system
+
         // LDUx/TDULC Link Control Opcode(s)
         public const byte LC_GROUP = 0x00;                   // GRP VCH USER - Group Voice Channel User
         public const byte LC_GROUP_UPDT = 0x02;              // GRP VCH UPDT - Group Voice Channel Update

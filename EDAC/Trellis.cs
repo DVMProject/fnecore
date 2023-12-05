@@ -76,7 +76,7 @@ namespace fnecore.EDAC
         /// <param name="data">Trellis symbol bytes.</param>
         /// <param name="payload">Output bytes.</param>
         /// <returns>True, if decoded, otherwise false.</returns>
-        public bool decode34(byte[] data, ref byte[] payload)
+        public bool Decode34(byte[] data, ref byte[] payload)
         {
             if (data == null)
                 throw new NullReferenceException("data");
@@ -84,16 +84,16 @@ namespace fnecore.EDAC
                 throw new NullReferenceException("payload");
 
             int[] dibits = new int[98U];
-            deinterleave(data, ref dibits);
+            Deinterleave(data, ref dibits);
 
             byte[] points = new byte[49U];
-            dibitsToPoints(dibits, ref points);
+            DibitsToPoints(dibits, ref points);
 
             // check the original code
             byte[] tribits = new byte[49U];
-            uint failPos = checkCode34(points, ref tribits);
+            uint failPos = CheckCode34(points, ref tribits);
             if (failPos == 999U) {
-                tribitsToBits(tribits, ref payload);
+                TribitsToBits(tribits, ref payload);
                 return true;
             }
 
@@ -101,7 +101,7 @@ namespace fnecore.EDAC
             for (uint i = 0U; i< 49U; i++)
                 savePoints[i] = points[i];
 
-            bool ret = fixCode34(points, failPos, ref payload);
+            bool ret = FixCode34(points, failPos, ref payload);
             if (ret)
                 return true;
 
@@ -109,7 +109,7 @@ namespace fnecore.EDAC
                 return false;
 
             // Backtrack one place for a last go
-            return fixCode34(savePoints, failPos - 1U, ref payload);
+            return FixCode34(savePoints, failPos - 1U, ref payload);
         }
 
         /// <summary>
@@ -117,7 +117,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="payload">Input bytes.</param>
         /// <param name="data">Trellis symbol bytes.</param>
-        public void encode34(byte[] payload, ref byte[] data)
+        public void Encode34(byte[] payload, ref byte[] data)
         {
             if (data == null)
                 throw new NullReferenceException("data");
@@ -125,7 +125,7 @@ namespace fnecore.EDAC
                 throw new NullReferenceException("payload");
 
             byte[] tribits = new byte[49U];
-            bitsToTribits(payload, ref tribits);
+            BitsToTribits(payload, ref tribits);
 
             byte[] points = new byte[49U];
             byte state = 0;
@@ -140,9 +140,9 @@ namespace fnecore.EDAC
             }
 
             int[] dibits = new int[98U];
-            pointsToDibits(points, ref dibits);
+            PointsToDibits(points, ref dibits);
 
-            interleave(dibits, ref data);
+            Interleave(dibits, ref data);
         }
 
         /// <summary>
@@ -151,7 +151,7 @@ namespace fnecore.EDAC
         /// <param name="data">Trellis symbol bytes.</param>
         /// <param name="payload">Output bytes.</param>
         /// <returns>True, if decoded, otherwise false.</returns>
-        public bool decode12(byte[] data, ref byte[] payload)
+        public bool Decode12(byte[] data, ref byte[] payload)
         {
             if (data == null)
                 throw new NullReferenceException("data");
@@ -159,17 +159,17 @@ namespace fnecore.EDAC
                 throw new NullReferenceException("payload");
 
             int[] dibits = new int[98U];
-            deinterleave(data, ref dibits);
+            Deinterleave(data, ref dibits);
 
             byte[] points = new byte[49U];
-            dibitsToPoints(dibits, ref points);
+            DibitsToPoints(dibits, ref points);
 
             // Check the original code
             byte[] bits = new byte[49U];
-            uint failPos = checkCode12(points, ref bits);
+            uint failPos = CheckCode12(points, ref bits);
             if (failPos == 999U)
             {
-                dibitsToBits(bits, ref payload);
+                DibitsToBits(bits, ref payload);
                 return true;
             }
 
@@ -177,7 +177,7 @@ namespace fnecore.EDAC
             for (uint i = 0U; i < 49U; i++)
                 savePoints[i] = points[i];
 
-            bool ret = fixCode12(points, failPos, ref payload);
+            bool ret = FixCode12(points, failPos, ref payload);
             if (ret)
                 return true;
 
@@ -185,7 +185,7 @@ namespace fnecore.EDAC
                 return false;
 
             // Backtrack one place for a last go
-            return fixCode12(savePoints, failPos - 1U, ref payload);
+            return FixCode12(savePoints, failPos - 1U, ref payload);
         }
 
         /// <summary>
@@ -193,7 +193,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="payload">Input bytes.</param>
         /// <param name="data">Trellis symbol bytes.</param>
-        public void encode12(byte[] payload, ref byte[] data)
+        public void Encode12(byte[] payload, ref byte[] data)
         {
             if (data == null)
                 throw new NullReferenceException("data");
@@ -201,7 +201,7 @@ namespace fnecore.EDAC
                 throw new NullReferenceException("payload");
 
             byte[] bits = new byte[49U];
-            bitsToDibits(payload, ref bits);
+            BitsToDibits(payload, ref bits);
 
             byte[] points = new byte[49U];
             byte state = 0;
@@ -216,9 +216,9 @@ namespace fnecore.EDAC
             }
 
             int[] dibits = new int[98U];
-            pointsToDibits(points, ref dibits);
+            PointsToDibits(points, ref dibits);
 
-            interleave(dibits, ref data);
+            Interleave(dibits, ref data);
         }
 
         /// <summary>
@@ -226,7 +226,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="data">Trellis symbol bytes.</param>
         /// <param name="dibits">Dibits.</param>
-        private void deinterleave(byte[] data, ref int[] dibits)
+        private void Deinterleave(byte[] data, ref int[] dibits)
         {
             for (uint i = 0U; i < 98U; i++) {
                 uint n = i * 2U + 0U;
@@ -255,7 +255,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="dibits">Dibits.</param>
         /// <param name="data">Trellis symbol bytes.</param>
-        private void interleave(int[] dibits, ref byte[] data)
+        private void Interleave(int[] dibits, ref byte[] data)
         {
             for (uint i = 0U; i < 98U; i++) {
                 uint n = INTERLEAVE_TABLE[i];
@@ -294,7 +294,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="dibits">Dibits.</param>
         /// <param name="points">4FSK constellation points.</param>
-        private void dibitsToPoints(int[] dibits, ref byte[] points)
+        private void DibitsToPoints(int[] dibits, ref byte[] points)
         {
             for (uint i = 0U; i < 49U; i++) {
                 if (dibits[i * 2U + 0U] == +1 && dibits[i * 2U + 1U] == -1)
@@ -337,7 +337,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="points">4FSK Constellation points.</param>
         /// <param name="dibits">Dibits.</param>
-        private void pointsToDibits(byte[] points, ref int[] dibits)
+        private void PointsToDibits(byte[] points, ref int[] dibits)
         {
             for (uint i = 0U; i < 49U; i++) {
                 switch (points[i])
@@ -415,7 +415,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="payload">Byte payload.</param>
         /// <param name="tribits">Tribits.</param>
-        private void bitsToTribits(byte[] payload, ref byte[] tribits)
+        private void BitsToTribits(byte[] payload, ref byte[] tribits)
         {
             for (uint i = 0U; i < 48U; i++) {
                 uint n = i * 3U;
@@ -442,7 +442,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="payload">Byte payload.</param>
         /// <param name="dibits">Dibits.</param>
-        private void bitsToDibits(byte[] payload, ref byte[] dibits)
+        private void BitsToDibits(byte[] payload, ref byte[] dibits)
         {
             for (uint i = 0U; i < 48U; i++) {
                 uint n = i * 2U;
@@ -466,7 +466,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="tribits">Tribits.</param>
         /// <param name="payload">Byte payload.</param>
-        private void tribitsToBits(byte[] tribits, ref byte[] payload)
+        private void TribitsToBits(byte[] tribits, ref byte[] payload)
         {
             for (uint i = 0U; i < 48U; i++) {
                 byte tribit = tribits[i];
@@ -490,7 +490,7 @@ namespace fnecore.EDAC
         /// </summary>
         /// <param name="dibits">Dibits.</param>
         /// <param name="payload">Byte payload.</param>
-        private void dibitsToBits(byte[] dibits, ref byte[] payload)
+        private void DibitsToBits(byte[] dibits, ref byte[] payload)
         {
             for (uint i = 0U; i < 48U; i++) {
                 byte dibit = dibits[i];
@@ -513,7 +513,7 @@ namespace fnecore.EDAC
         /// <param name="failPos"></param>
         /// <param name="payload">Byte payload.</param>
         /// <returns>True, if error corrected, otherwise false.</returns>
-        private bool fixCode34(byte[] points, uint failPos, ref byte[] payload)
+        private bool FixCode34(byte[] points, uint failPos, ref byte[] payload)
         {
             for (uint j = 0; j < 20; j++) 
             {
@@ -525,10 +525,10 @@ namespace fnecore.EDAC
                     points[failPos] = i;
 
                     byte[] tribits = new byte[49];
-                    uint pos = checkCode34(points, ref tribits);
+                    uint pos = CheckCode34(points, ref tribits);
                     if (pos == 999)
                     {
-                        tribitsToBits(tribits, ref payload);
+                        TribitsToBits(tribits, ref payload);
                         return true;
                     }
 
@@ -552,7 +552,7 @@ namespace fnecore.EDAC
         /// <param name="points">4FSK constellation points.</param>
         /// <param name="tribits">Tribits.</param>
         /// <returns></returns>
-        private uint checkCode34(byte[] points, ref byte[] tribits)
+        private uint CheckCode34(byte[] points, ref byte[] tribits)
         {
             byte state = 0;
 
@@ -589,7 +589,7 @@ namespace fnecore.EDAC
         /// <param name="failPos"></param>
         /// <param name="payload">Byte payload.</param>
         /// <returns>True, if error corrected, otherwise false.</returns>
-        private bool fixCode12(byte[] points, uint failPos, ref byte[] payload)
+        private bool FixCode12(byte[] points, uint failPos, ref byte[] payload)
         {
             for (uint j = 0; j < 20; j++) {
                 uint bestPos = 0;
@@ -600,10 +600,10 @@ namespace fnecore.EDAC
                     points[failPos] = i;
 
                     byte[] dibits = new byte[49];
-                    uint pos = checkCode12(points, ref dibits);
+                    uint pos = CheckCode12(points, ref dibits);
                     if (pos == 999)
                     {
-                        dibitsToBits(dibits, ref payload);
+                        DibitsToBits(dibits, ref payload);
                         return true;
                     }
 
@@ -627,7 +627,7 @@ namespace fnecore.EDAC
         /// <param name="points">4FSK constellation points.</param>
         /// <param name="dibits">Dibits.</param>
         /// <returns></returns>
-        private uint checkCode12(byte[] points, ref byte[] dibits)
+        private uint CheckCode12(byte[] points, ref byte[] dibits)
         {
             byte state = 0;
 
