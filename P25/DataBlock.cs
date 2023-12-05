@@ -11,7 +11,7 @@
 // Licensed under the GPLv2 License (https://opensource.org/licenses/GPL-2.0)
 //
 /*
-*   Copyright (C) 2022 by Bryan Biedenkapp N2PLL
+*   Copyright (C) 2023 by Bryan Biedenkapp N2PLL
 *
 *   This program is free software: you can redistribute it and/or modify
 *   it under the terms of the GNU Affero General Public License as published by
@@ -224,8 +224,10 @@ namespace fnecore.P25
         /// <summary>
         /// Gets the raw data stored in the data block.
         /// </summary>
+        /// <param name="buffer"></param>
+        /// <param name="offset"></param>
         /// <returns></returns>
-        public uint GetData(ref byte[] buffer)
+        public uint GetData(ref byte[] buffer, uint offset)
         {
             if (buffer == null)
                 throw new NullReferenceException("buffer");
@@ -233,13 +235,13 @@ namespace fnecore.P25
             if (Format == P25Defines.PDU_FMT_CONFIRMED)
             {
                 for (uint i = 0; i < P25Defines.P25_PDU_CONFIRMED_DATA_LENGTH_BYTES; i++)
-                    buffer[i] = data[i];
+                    buffer[i + offset] = data[i];
                 return P25Defines.P25_PDU_CONFIRMED_DATA_LENGTH_BYTES;
             }
             else if (Format == P25Defines.PDU_FMT_UNCONFIRMED || Format == P25Defines.PDU_FMT_RSP || Format == P25Defines.PDU_FMT_AMBT)
             {
                 for (uint i = 0; i < P25Defines.P25_PDU_UNCONFIRMED_LENGTH_BYTES; i++)
-                    data[i] = buffer[i];
+                    buffer[i + offset] = data[i];
                 return P25Defines.P25_PDU_UNCONFIRMED_LENGTH_BYTES;
             }
             else

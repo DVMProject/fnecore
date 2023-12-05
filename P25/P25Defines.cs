@@ -137,10 +137,18 @@ namespace fnecore.P25
 
         public const byte P25_MI_LENGTH = 9;
 
+        public const byte P25_LDU_FRAME_LENGTH_BYTES = 216;
+
+        public const byte P25_MAX_PDU_COUNT = 32;
+        public const uint P25_MAX_PDU_LENGTH = 512;
+
         public const byte P25_PDU_HEADER_LENGTH_BYTES = 12;
         public const byte P25_PDU_CONFIRMED_LENGTH_BYTES = 18;
         public const byte P25_PDU_CONFIRMED_DATA_LENGTH_BYTES = 16;
         public const byte P25_PDU_UNCONFIRMED_LENGTH_BYTES = 12;
+
+        public const byte P25_PDU_FEC_LENGTH_BYTES = 25;
+        public const byte P25_PDU_FEC_LENGTH_BITS = (byte)(P25_PDU_FEC_LENGTH_BYTES * 8U - 4U); // Trellis is actually 196 bits
 
         // PDU Format Type(s)
         public const byte PDU_FMT_RSP = 0x03;
