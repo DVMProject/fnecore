@@ -40,7 +40,7 @@ namespace fnecore.EDAC
             6, 7, 14, 15, 22, 23, 30, 31, 38, 39, 46, 47, 54, 55, 62, 63, 70, 71, 78, 79, 86, 87, 94, 95
         };
 
-        private static readonly byte[] ENCODE_TABLE_34 = new byte[] {
+        private static readonly byte[] ENCODE_TABLE_34 = new byte[64] {
             0,  8, 4, 12, 2, 10, 6, 14,
             4, 12, 2, 10, 6, 14, 0,  8,
             1,  9, 5, 13, 3, 11, 7, 15,
@@ -51,7 +51,7 @@ namespace fnecore.EDAC
             6, 14, 0,  8, 4, 12, 2, 10
         };
 
-        private static readonly byte[] ENCODE_TABLE_12 = new byte[] {
+        private static readonly byte[] ENCODE_TABLE_12 = new byte[16] {
             0,  15, 12,  3,
             4,  11,  8,  7,
             13,  2,  1, 14,
