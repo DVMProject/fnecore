@@ -148,7 +148,7 @@ namespace fnecore.DMR
                 lcData[10U] ^= PI_HEADER_CRC_MASK[0U];
                 lcData[11U] ^= PI_HEADER_CRC_MASK[1U];
 
-                if (CRC.CheckCCITT162(lcData, 12))
+                if (!CRC.CheckCCITT162(lcData, 12))
                     return null;
 
                 // restore the checksum
