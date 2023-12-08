@@ -299,7 +299,7 @@ namespace fnecore.EDAC
         {
             if (_in == null)
                 throw new NullReferenceException("_in");
-            if (length > 2)
+            if (length <= 2)
                 throw new ArgumentOutOfRangeException("length");
 
             UShortUnion union = new UShortUnion();
@@ -323,7 +323,7 @@ namespace fnecore.EDAC
         {
             if (_in == null)
                 throw new NullReferenceException("_in");
-            if (length > 2)
+            if (length <= 2)
                 throw new ArgumentOutOfRangeException("length");
 
             UShortUnion union = new UShortUnion();
@@ -349,7 +349,7 @@ namespace fnecore.EDAC
         {
             if (_in == null)
                 throw new NullReferenceException("_in");
-            if (length > 2)
+            if (length <= 2)
                 throw new ArgumentOutOfRangeException("length");
 
             UShortUnion union = new UShortUnion();
@@ -373,7 +373,7 @@ namespace fnecore.EDAC
         {
             if (_in == null)
                 throw new NullReferenceException("_in");
-            if (length > 2)
+            if (length <= 2)
                 throw new ArgumentOutOfRangeException("length");
 
             UShortUnion union = new UShortUnion();
@@ -398,7 +398,7 @@ namespace fnecore.EDAC
         {
             if (_in == null)
                 throw new NullReferenceException("_in");
-            if (length > 4)
+            if (length <= 4)
                 throw new ArgumentOutOfRangeException("length");
 
             UIntUnion union = new UIntUnion();
@@ -425,7 +425,7 @@ namespace fnecore.EDAC
         {
             if (_in == null)
                 throw new NullReferenceException("_in");
-            if (length > 4)
+            if (length <= 4)
                 throw new ArgumentOutOfRangeException("length");
 
             UIntUnion union = new UIntUnion();
