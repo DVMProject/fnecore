@@ -154,12 +154,19 @@ namespace fnecore
 
             TimeSpan timeSinceStart = DateTime.Now - start;
 
-            uint ts = (uint)rand.Next(int.MinValue, int.MaxValue);
             ulong microSeconds = (ulong)(timeSinceStart.Ticks * Constants.RtpGenericClockRate);
-            Timestamp = ts + (uint)(microSeconds / 1000000);
+            Timestamp = (uint)(microSeconds / 1000000);
 
             FneUtils.WriteBytes(Timestamp, ref data, 4);                        // Timestamp
             FneUtils.WriteBytes(SSRC, ref data, 8);                             // Synchronization Source ID
+        }
+
+        /// <summary>
+        /// Helper to reset the start timestamp.
+        /// </summary>
+        public static void ResetStartTime()
+        {
+            start = DateTime.Now;
         }
     } // public class RtpHeader
 } // namespace fnecore
