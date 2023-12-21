@@ -21,6 +21,7 @@
 */
 
 using System;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -57,6 +58,49 @@ namespace fnecore
             generator.Emit(OpCodes.Ret);
 
             memsetDelegate = (Action<IntPtr, byte, int>)dynamicMethod.CreateDelegate(typeof(Action<IntPtr, byte, int>));
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="x"></param>
+        /// <returns></returns>
+        public static ushort DoReverseEndian(ushort x)
+        {
+            //return Convert.ToUInt16((x << 8 & 0xff00) | (x >> 8));
+            return BitConverter.ToUInt16(BitConverter.GetBytes(x).Reverse().ToArray(), 0);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="x"></param>
+        /// <returns></returns>
+        public static uint DoReverseEndian(uint x)
+        {
+            //return (x << 24 | (x & 0xff00) << 8 | (x & 0xff0000) >> 8 | x >> 24);
+            return BitConverter.ToUInt32(BitConverter.GetBytes(x).Reverse().ToArray(), 0);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="x"></param>
+        /// <returns></returns>
+        public static ulong DoReverseEndian(ulong x)
+        {
+            //return (x << 56 | (x & 0xff00) << 40 | (x & 0xff0000) << 24 | (x & 0xff000000) << 8 | (x & 0xff00000000) >> 8 | (x & 0xff0000000000) >> 24 | (x & 0xff000000000000) >> 40 | x >> 56);
+            return BitConverter.ToUInt64(BitConverter.GetBytes(x).Reverse().ToArray(), 0);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="x"></param>
+        /// <returns></returns>
+        public static int DoReverseEndian(int x)
+        {
+            return BitConverter.ToInt32(BitConverter.GetBytes(x).Reverse().ToArray(), 0);
         }
 
         /// <summary>

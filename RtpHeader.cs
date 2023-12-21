@@ -129,7 +129,7 @@ namespace fnecore
             Sequence = (ushort)((data[2] << 8) | (data[3] << 0));               // Sequence
 
             Timestamp = FneUtils.ToUInt32(data, 4);                             // Timestamp
-            SSRC = FneUtils.ToUInt32(data, 6);                                  // Synchronization Source ID
+            SSRC = FneUtils.ToUInt32(data, 8);                                  // Synchronization Source ID
 
             return true;
         }
