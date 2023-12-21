@@ -30,7 +30,6 @@ namespace fnecore
     public class RtpExtensionHeader
     {
         protected int offset = 0;
-        protected ushort payloadLength;
 
         /// <summary>
         /// Format of the extension header payload contained within the packet.
@@ -40,7 +39,7 @@ namespace fnecore
         /// <summary>
         /// Length of the extension header payload (in 32-bit units).
         /// </summary>
-        public ushort PayloadLength { get => payloadLength; }
+        public ushort PayloadLength { get; set; }
 
         /*
         ** Methods
@@ -53,7 +52,7 @@ namespace fnecore
         {
             this.offset = offset;
             PayloadType = 0;
-            payloadLength = 0;
+            PayloadLength = 0;
         }
 
         /// <summary>
@@ -66,7 +65,7 @@ namespace fnecore
                 return false;
 
             PayloadType = (ushort)((data[0 + offset] << 8) | (data[1 + offset] << 0));      // Payload Type
-            payloadLength = (ushort)((data[2 + offset] << 8) | (data[3 + offset] << 0));    // Payload Length
+            PayloadLength = (ushort)((data[2 + offset] << 8) | (data[3 + offset] << 0));    // Payload Length
 
             return true;
         }
@@ -82,8 +81,8 @@ namespace fnecore
 
             data[0 + offset] = (byte)((PayloadType >> 8) & 0xFFU);              // Payload Type MSB
             data[1 + offset] = (byte)((PayloadType >> 0) & 0xFFU);              // Payload Type LSB
-            data[2 + offset] = (byte)((payloadLength >> 8) & 0xFFU);            // Payload Length MSB
-            data[3 + offset] = (byte)((payloadLength >> 0) & 0xFFU);            // Payload Length LSB
+            data[2 + offset] = (byte)((PayloadLength >> 8) & 0xFFU);            // Payload Length MSB
+            data[3 + offset] = (byte)((PayloadLength >> 0) & 0xFFU);            // Payload Length LSB
         }
     } // public class RtpExtensionHeader
 } // namespace fnecore

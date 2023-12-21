@@ -86,7 +86,7 @@ namespace fnecore
             if (!base.Decode(data))
                 return false;
 
-            if (payloadLength != Constants.RtpFNEHeaderExtLength)
+            if (PayloadLength != Constants.RtpFNEHeaderExtLength)
                 return false;
             if (PayloadType != Constants.DVMFrameStart)
                 return false;
@@ -112,7 +112,7 @@ namespace fnecore
                 return;
 
             PayloadType = Constants.DVMFrameStart;
-            payloadLength = Constants.RtpFNEHeaderExtLength;
+            PayloadLength = Constants.RtpFNEHeaderExtLength;
             base.Encode(ref data);
 
             data[4 + offset] = (byte)((CRC >> 8) & 0xFFU);                      // CRC-16 MSB
