@@ -117,14 +117,14 @@ namespace fnecore.EDAC.RS
                 uint offs = 0U;
                 for (uint j = 0U; j < 12U; j++, offs += 6U)
                 {
-                    byte hexbit = bin2Hex(data, offs);
+                    byte hexbit = ReedSolomonAlgorithm.bin2Hex(data, offs);
                     codeword[i] ^= gf6Mult(hexbit, ENCODE_MATRIX[j][i]);
                 }
             }
 
             uint offset = 0U;
             for (uint i = 0U; i < 24U; i++, offset += 6U)
-                hex2Bin(codeword[i], ref data, offset);
+                ReedSolomonAlgorithm.hex2Bin(codeword[i], ref data, offset);
         }
 
         /// <summary>
@@ -145,14 +145,14 @@ namespace fnecore.EDAC.RS
                 uint offs = 0U;
                 for (uint j = 0U; j < 16U; j++, offs += 6U)
                 {
-                    byte hexbit = bin2Hex(data, offs);
+                    byte hexbit = ReedSolomonAlgorithm.bin2Hex(data, offs);
                     codeword[i] ^= gf6Mult(hexbit, ENCODE_MATRIX_24169[j][i]);
                 }
             }
 
             uint offset = 0U;
             for (uint i = 0U; i < 24U; i++, offset += 6U)
-                hex2Bin(codeword[i], ref data, offset);
+                ReedSolomonAlgorithm.hex2Bin(codeword[i], ref data, offset);
         }
 
         /// <summary>
@@ -173,51 +173,14 @@ namespace fnecore.EDAC.RS
                 uint offs = 0U;
                 for (uint j = 0U; j < 20U; j++, offs += 6U)
                 {
-                    byte hexbit = bin2Hex(data, offs);
+                    byte hexbit = ReedSolomonAlgorithm.bin2Hex(data, offs);
                     codeword[i] ^= gf6Mult(hexbit, ENCODE_MATRIX_362017[j][i]);
                 }
             }
 
             uint offset = 0U;
             for (uint i = 0U; i < 36U; i++, offset += 6U)
-                hex2Bin(codeword[i], ref data, offset);
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="input"></param>
-        /// <param name="offset"></param>
-        /// <returns></returns>
-        private byte bin2Hex(byte[] input, uint offset)
-        {
-            byte output = 0x00;
-
-            output |= (byte)(FneUtils.ReadBit(input, offset + 0U) ? 0x20U : 0x00U);
-            output |= (byte)(FneUtils.ReadBit(input, offset + 1U) ? 0x10U : 0x00U);
-            output |= (byte)(FneUtils.ReadBit(input, offset + 2U) ? 0x08U : 0x00U);
-            output |= (byte)(FneUtils.ReadBit(input, offset + 3U) ? 0x04U : 0x00U);
-            output |= (byte)(FneUtils.ReadBit(input, offset + 4U) ? 0x02U : 0x00U);
-            output |= (byte)(FneUtils.ReadBit(input, offset + 5U) ? 0x01U : 0x00U);
-
-            return output;
-        }
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="input"></param>
-        /// <param name="output"></param>
-        /// <param name="offset"></param>
-        /// <returns></returns>
-        private void hex2Bin(byte input, ref byte[] output, uint offset)
-        {
-            FneUtils.WriteBit(ref output, offset + 0U, (input & 0x20U) == 0x20U);
-            FneUtils.WriteBit(ref output, offset + 1U, (input & 0x10U) == 0x10U);
-            FneUtils.WriteBit(ref output, offset + 2U, (input & 0x08U) == 0x08U);
-            FneUtils.WriteBit(ref output, offset + 3U, (input & 0x04U) == 0x04U);
-            FneUtils.WriteBit(ref output, offset + 4U, (input & 0x02U) == 0x02U);
-            FneUtils.WriteBit(ref output, offset + 5U, (input & 0x01U) == 0x01U);
+                ReedSolomonAlgorithm.hex2Bin(codeword[i], ref data, offset);
         }
 
         /// <summary>

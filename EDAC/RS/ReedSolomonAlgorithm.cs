@@ -30,7 +30,7 @@ namespace fnecore.EDAC.RS
         /// <summary>
         /// (63,47,17)
         /// </summary>
-        ReedSolomon_634717,
+        ReedSolomon_362017,
         /// <summary>
         /// (24,12,13)
         /// </summary>
@@ -62,7 +62,7 @@ namespace fnecore.EDAC.RS
             byte[] output = new byte[message.Length];
             Buffer.BlockCopy(message, 0, output, 0, message.Length);
 
-            if (eccType == ErrorCorrectionCodeType.ReedSolomon_634717)
+            if (eccType == ErrorCorrectionCodeType.ReedSolomon_362017)
             {
                 reedSolomonEncoder.encode362017(ref output);
                 return output;
@@ -89,7 +89,92 @@ namespace fnecore.EDAC.RS
         /// <returns>Returns the repaired message, or null if it cannot be repaired.</returns>
         public static byte[] Decode(byte[] message, ErrorCorrectionCodeType eccType)
         {
-            throw new NotImplementedException();
+            byte[] codeword = new byte[63];
+
+            if (eccType == ErrorCorrectionCodeType.ReedSolomon_362017)
+            {
+                uint offset = 0U;
+                for (uint i = 0U; i < 36U; i++, offset += 6)
+                    codeword[27 + i] = bin2Hex(message, offset);
+
+                ReedSolomonDecoder rs362017 = new ReedSolomonDecoder(64, 47, 16, 0x43);
+                byte[] codewordEC = rs362017.DecodeEx(codeword);
+
+                byte[] messageOut = new byte[message.Length];
+                offset = 0U;
+                for (uint i = 0U; i < 20U; i++, offset += 6)
+                    hex2Bin(codewordEC[27 + i], ref messageOut, offset);
+                return messageOut;
+            }
+            else if (eccType == ErrorCorrectionCodeType.ReedSolomon_241213)
+            {
+                uint offset = 0U;
+                for (uint i = 0U; i < 24U; i++, offset += 6)
+                    codeword[39 + i] = bin2Hex(message, offset);
+
+                ReedSolomonDecoder rs241213 = new ReedSolomonDecoder(64, 51, 12, 0x43);
+                byte[] codewordEC = rs241213.DecodeEx(codeword);
+
+                byte[] messageOut = new byte[message.Length];
+                offset = 0U;
+                for (uint i = 0U; i < 12U; i++, offset += 6)
+                    hex2Bin(codewordEC[39 + i], ref messageOut, offset);
+                return messageOut;
+            }
+            else if (eccType == ErrorCorrectionCodeType.ReedSolomon_24169)
+            {
+                uint offset = 0U;
+                for (uint i = 0U; i < 24U; i++, offset += 6)
+                    codeword[39 + i] = bin2Hex(message, offset);
+
+                ReedSolomonDecoder rs24169 = new ReedSolomonDecoder(64, 55, 8, 0x43);
+                byte[] codewordEC = rs24169.DecodeEx(codeword);
+
+                byte[] messageOut = new byte[message.Length];
+                offset = 0U;
+                for (uint i = 0U; i < 16U; i++, offset += 6)
+                    hex2Bin(codewordEC[39 + i], ref messageOut, offset);
+                return messageOut;
+            }
+            else
+                throw new ArgumentException($"Invalid '{nameof(eccType)}' argument.", nameof(eccType));
+        }
+
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="input"></param>
+        /// <param name="offset"></param>
+        /// <returns></returns>
+        internal static byte bin2Hex(byte[] input, uint offset)
+        {
+            byte output = 0x00;
+
+            output |= (byte)(FneUtils.ReadBit(input, offset + 0U) ? 0x20U : 0x00U);
+            output |= (byte)(FneUtils.ReadBit(input, offset + 1U) ? 0x10U : 0x00U);
+            output |= (byte)(FneUtils.ReadBit(input, offset + 2U) ? 0x08U : 0x00U);
+            output |= (byte)(FneUtils.ReadBit(input, offset + 3U) ? 0x04U : 0x00U);
+            output |= (byte)(FneUtils.ReadBit(input, offset + 4U) ? 0x02U : 0x00U);
+            output |= (byte)(FneUtils.ReadBit(input, offset + 5U) ? 0x01U : 0x00U);
+
+            return output;
+        }
+
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="input"></param>
+        /// <param name="output"></param>
+        /// <param name="offset"></param>
+        /// <returns></returns>
+        internal static void hex2Bin(byte input, ref byte[] output, uint offset)
+        {
+            FneUtils.WriteBit(ref output, offset + 0U, (input & 0x20U) == 0x20U);
+            FneUtils.WriteBit(ref output, offset + 1U, (input & 0x10U) == 0x10U);
+            FneUtils.WriteBit(ref output, offset + 2U, (input & 0x08U) == 0x08U);
+            FneUtils.WriteBit(ref output, offset + 3U, (input & 0x04U) == 0x04U);
+            FneUtils.WriteBit(ref output, offset + 4U, (input & 0x02U) == 0x02U);
+            FneUtils.WriteBit(ref output, offset + 5U, (input & 0x01U) == 0x01U);
         }
     } // public static class ReedSolomonAlgorithm
 } // namespace fnecore.EDAC.RS
