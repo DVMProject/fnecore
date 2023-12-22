@@ -545,6 +545,43 @@ namespace fnecore
         }
 
         /// <summary>
+        ///
+        /// </summary>
+        /// <param name="input"></param>
+        /// <param name="offset"></param>
+        /// <returns></returns>
+        public static byte BIN2HEX(byte[] input, uint offset)
+        {
+            byte output = 0x00;
+
+            output |= (byte)(ReadBit(input, offset + 0U) ? 0x20U : 0x00U);
+            output |= (byte)(ReadBit(input, offset + 1U) ? 0x10U : 0x00U);
+            output |= (byte)(ReadBit(input, offset + 2U) ? 0x08U : 0x00U);
+            output |= (byte)(ReadBit(input, offset + 3U) ? 0x04U : 0x00U);
+            output |= (byte)(ReadBit(input, offset + 4U) ? 0x02U : 0x00U);
+            output |= (byte)(ReadBit(input, offset + 5U) ? 0x01U : 0x00U);
+
+            return output;
+        }
+
+        /// <summary>
+        ///
+        /// </summary>
+        /// <param name="input"></param>
+        /// <param name="output"></param>
+        /// <param name="offset"></param>
+        /// <returns></returns>
+        public static void HEX2BIN(byte input, ref byte[] output, uint offset)
+        {
+            WriteBit(ref output, offset + 0U, (input & 0x20U) == 0x20U);
+            WriteBit(ref output, offset + 1U, (input & 0x10U) == 0x10U);
+            WriteBit(ref output, offset + 2U, (input & 0x08U) == 0x08U);
+            WriteBit(ref output, offset + 3U, (input & 0x04U) == 0x04U);
+            WriteBit(ref output, offset + 4U, (input & 0x02U) == 0x02U);
+            WriteBit(ref output, offset + 5U, (input & 0x01U) == 0x01U);
+        }
+
+        /// <summary>
         /// Primitive conversion from Unicode to ASCII that preserves special characters.
         /// </summary>
         /// <param name="value">The string to convert.</param>
@@ -814,6 +851,24 @@ namespace fnecore
         {
             using (SHA256 hash = SHA256Managed.Create())
                 return hash.ComputeHash(value);
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name=""></param>
+        /// <param name="v"></param>
+        /// <returns></returns>
+        public static uint CountBits(uint v)
+        {
+            uint count = 0U;
+            while (v != 0U)
+            {
+                v &= v - 1U;
+                count++;
+            }
+
+            return count;
         }
     } // public class FneUtils
 } // namespace fnecore

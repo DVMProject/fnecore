@@ -117,14 +117,14 @@ namespace fnecore.EDAC.RS
                 uint offs = 0U;
                 for (uint j = 0U; j < 12U; j++, offs += 6U)
                 {
-                    byte hexbit = ReedSolomonAlgorithm.bin2Hex(data, offs);
+                    byte hexbit = FneUtils.BIN2HEX(data, offs);
                     codeword[i] ^= gf6Mult(hexbit, ENCODE_MATRIX[j][i]);
                 }
             }
 
             uint offset = 0U;
             for (uint i = 0U; i < 24U; i++, offset += 6U)
-                ReedSolomonAlgorithm.hex2Bin(codeword[i], ref data, offset);
+                FneUtils.HEX2BIN(codeword[i], ref data, offset);
         }
 
         /// <summary>
@@ -145,14 +145,14 @@ namespace fnecore.EDAC.RS
                 uint offs = 0U;
                 for (uint j = 0U; j < 16U; j++, offs += 6U)
                 {
-                    byte hexbit = ReedSolomonAlgorithm.bin2Hex(data, offs);
+                    byte hexbit = FneUtils.BIN2HEX(data, offs);
                     codeword[i] ^= gf6Mult(hexbit, ENCODE_MATRIX_24169[j][i]);
                 }
             }
 
             uint offset = 0U;
             for (uint i = 0U; i < 24U; i++, offset += 6U)
-                ReedSolomonAlgorithm.hex2Bin(codeword[i], ref data, offset);
+                FneUtils.HEX2BIN(codeword[i], ref data, offset);
         }
 
         /// <summary>
@@ -173,14 +173,14 @@ namespace fnecore.EDAC.RS
                 uint offs = 0U;
                 for (uint j = 0U; j < 20U; j++, offs += 6U)
                 {
-                    byte hexbit = ReedSolomonAlgorithm.bin2Hex(data, offs);
+                    byte hexbit = FneUtils.BIN2HEX(data, offs);
                     codeword[i] ^= gf6Mult(hexbit, ENCODE_MATRIX_362017[j][i]);
                 }
             }
 
             uint offset = 0U;
             for (uint i = 0U; i < 36U; i++, offset += 6U)
-                ReedSolomonAlgorithm.hex2Bin(codeword[i], ref data, offset);
+                FneUtils.HEX2BIN(codeword[i], ref data, offset);
         }
 
         /// <summary>

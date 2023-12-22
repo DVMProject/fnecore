@@ -51,6 +51,9 @@ namespace fnecore.P25
         public const uint P25_DFSI_LDU2_VOICE17_FRAME_LENGTH_BYTES = 17;
         public const uint P25_DFSI_LDU2_VOICE18_FRAME_LENGTH_BYTES = 16;
 
+        public const uint P25_DFSI_VHDR_RAW_LEN = 36;
+        public const uint P25_DFSI_VHDR_LEN = 27;
+
         public const byte P25_DFSI_STATUS_NO_ERROR = 0x00;   //
         public const byte P25_DFSI_STATUS_ERASE = 0x02;      //
 
@@ -131,6 +134,11 @@ namespace fnecore.P25
     /// </summary>
     public class P25Defines
     {
+        public const byte P25_FT_HDU_VALID = 0x01;
+        public const byte P25_FT_HDU_LATE_ENTRY = 0x02;
+        public const byte P25_FT_TERMINATOR = 0x03;
+        public const byte P25_FT_DATA_UNIT = 0x00;
+
         public const byte P25_MFG_STANDARD = 0x00;
 
         public const byte P25_ALGO_UNENCRYPT = 0x80;
