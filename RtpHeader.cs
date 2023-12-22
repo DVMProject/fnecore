@@ -31,6 +31,7 @@ namespace fnecore
     {
         private Random rand;
         private static DateTime start = DateTime.Now;
+        private static uint previousTS = Constants.InvalidTS;
 
         private byte version;
         private bool padding;
@@ -152,10 +153,18 @@ namespace fnecore
             data[2] = (byte)((Sequence >> 8) & 0xFFU);                          // Sequence MSB
             data[3] = (byte)((Sequence >> 0) & 0xFFU);                          // Sequence LSB
 
-            TimeSpan timeSinceStart = DateTime.Now - start;
-
-            ulong microSeconds = (ulong)(timeSinceStart.Ticks * Constants.RtpGenericClockRate);
-            Timestamp = (uint)(microSeconds / 1000000);
+            if (previousTS == Constants.InvalidTS)
+            {
+                TimeSpan timeSinceStart = DateTime.Now - start;
+                ulong microSeconds = (ulong)(timeSinceStart.Ticks * Constants.RtpGenericClockRate);
+                Timestamp = (uint)(microSeconds);
+                previousTS = Timestamp;
+            }
+            else
+            {
+                Timestamp = previousTS + (Constants.RtpGenericClockRate / 133);
+                previousTS = Timestamp;
+            }
 
             FneUtils.WriteBytes(Timestamp, ref data, 4);                        // Timestamp
             FneUtils.WriteBytes(SSRC, ref data, 8);                             // Synchronization Source ID
@@ -167,6 +176,7 @@ namespace fnecore
         public static void ResetStartTime()
         {
             start = DateTime.Now;
+            previousTS = Constants.InvalidTS;
         }
     } // public class RtpHeader
 } // namespace fnecore
