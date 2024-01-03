@@ -37,7 +37,7 @@ namespace fnecore
     /// <summary>
     /// Metadata class containing remote call data.
     /// </summary>
-    public abstract class RemoteCallData
+    public class RemoteCallData
     {
         /// <summary>
         /// Source ID.
