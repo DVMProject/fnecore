@@ -125,7 +125,7 @@ namespace fnecore
             FrameType = FrameType.TERMINATOR;
             Slot = 0;
         }
-    } // public abstract class RemoteCallData
+    } // public class RemoteCallData
 
     /// <summary>
     /// Implements a FNE system.
