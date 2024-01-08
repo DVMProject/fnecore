@@ -485,8 +485,6 @@ namespace fnecore
                 throw new InvalidOperationException($"TSBK length must be {P25Defines.P25_TSBK_LENGTH_BYTES}, passed length is {tsbk.Length}");
 
             Trellis trellis = new Trellis();
-            FnePeer peer = (FnePeer)fne;
-            ushort pktSeq = peer.pktSeq(true);
 
             byte[] payload = new byte[200];
             CreateP25MessageHdr((byte)P25DUID.TSDU, callData, ref payload);
@@ -501,7 +499,22 @@ namespace fnecore
             Buffer.BlockCopy(raw, 0, payload, 24, raw.Length);
             payload[23U] = (byte)(P25_MSG_HDR_SIZE + raw.Length);
 
-            peer.SendMaster(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
+            // what type of FNE are we?
+            if (FneType == FneType.MASTER)
+            {
+                FneMaster master = (FneMaster)fne;
+                lock (master.Peers)
+                {
+                    foreach (uint peerId in master.Peers.Keys)
+                        master.SendPeer(peerId, FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, 0, callData.TxStreamID);
+                }
+            }
+            else if (FneType == FneType.PEER)
+            {
+                FnePeer peer = (FnePeer)fne;
+                ushort pktSeq = peer.pktSeq(true);
+                peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
+            }
         }
 
         /// <summary>
@@ -511,9 +524,6 @@ namespace fnecore
         /// <param name="grantDemand"></param>
         public virtual void SendP25TDU(RemoteCallData callData, bool grantDemand = false)
         {
-            FnePeer peer = (FnePeer)fne;
-            ushort pktSeq = peer.pktSeq(true);
-
             byte[] payload = new byte[200];
             CreateP25MessageHdr((byte)P25DUID.TDU, callData, ref payload);
             payload[23U] = P25_MSG_HDR_SIZE;
@@ -522,7 +532,22 @@ namespace fnecore
             if (grantDemand)
                 payload[14U] |= 0x80;
 
-            peer.SendMaster(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
+            // what type of FNE are we?
+            if (FneType == FneType.MASTER)
+            {
+                FneMaster master = (FneMaster)fne;
+                lock (master.Peers)
+                {
+                    foreach (uint peerId in master.Peers.Keys)
+                        master.SendPeer(peerId, FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, 0, callData.TxStreamID);
+                }
+            }
+            else if (FneType == FneType.PEER)
+            {
+                FnePeer peer = (FnePeer)fne;
+                ushort pktSeq = peer.pktSeq(true);
+                peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
+            }
         }
     } // public abstract class FneSystemBase
 } // namespace fnecore
