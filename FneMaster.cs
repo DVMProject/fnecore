@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2023 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2024 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -216,6 +216,21 @@ namespace fnecore
         /// Event action that handles peer diagnostic transfers.
         /// </summary>
         public Action<uint, string> DiagnosticTransfer = null;
+
+        /// <summary>
+        /// Event action that handles peer unit registration announcements.
+        /// </summary>
+        public Action<uint, uint> UnitRegistration = null;
+
+        /// <summary>
+        /// Event action that handles peer unit deregistration announcements
+        /// </summary>
+        public Action<uint, uint> UnitDeregistration = null;
+
+        /// <summary>
+        /// Event action that handles peer group affiliation announcements
+        /// </summary>
+        public Action<uint, uint, uint> UnitGroupAffiliation = null;
 
         /*
         ** Methods
@@ -1095,6 +1110,65 @@ namespace fnecore
                                                 string msg = Encoding.ASCII.GetString(buffer);
                                                 if (DiagnosticTransfer != null)
                                                     DiagnosticTransfer(peerId, msg);
+                                            }
+                                        }
+                                    }
+                                }
+                                else
+                                    Log(LogLevel.ERROR, $"({systemName}) Unknown transfer opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                            }
+                            break;
+
+                        case Constants.NET_FUNC_ANNOUNCE:
+                            {
+                                else if (fneHeader.SubFunction == Constants.NET_ANNC_SUBFUNC_GRP_AFFIL) // Announce Group Affiliation
+                                {
+                                    // can we do activity transfers?
+                                    if (AllowActivityTransfer)
+                                    {
+                                        if (peerId > 0 && peers.ContainsKey(peerId))
+                                        {
+                                            // validate peer (simple validation really
+                                            if (peers[peerId].Connection && peers[peerId].EndPoint.ToString() == frame.Endpoint.ToString())
+                                            {
+                                                uint srcId = FneUtils.Bytes3ToUInt32(buffer, 0);
+                                                uint dstId = FneUtils.Bytes3ToUInt32(buffer, 3);
+                                                if (UnitGroupAffiliation != null)
+                                                    UnitGroupAffiliation(peerId, srcId, dstId);
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (fneHeader.SubFunction == Constants.NET_ANNC_SUBFUNC_UNIT_REG)  // Announce Unit Registration
+                                {
+                                    // can we do activity transfers?
+                                    if (AllowActivityTransfer)
+                                    {
+                                        if (peerId > 0 && peers.ContainsKey(peerId))
+                                        {
+                                            // validate peer (simple validation really
+                                            if (peers[peerId].Connection && peers[peerId].EndPoint.ToString() == frame.Endpoint.ToString())
+                                            {
+                                                uint srcId = FneUtils.Bytes3ToUInt32(buffer, 0);
+                                                if (UnitRegistration != null)
+                                                    UnitRegistration(peerId, srcId);
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (fneHeader.SubFunction == Constants.NET_ANNC_SUBFUNC_UNIT_DEREG) // Announce Unit Deregistration
+                                {
+                                    // can we do diagnostic transfers?
+                                    if (AllowDiagnosticTransfer)
+                                    {
+                                        if (peerId > 0 && peers.ContainsKey(peerId))
+                                        {
+                                            // validate peer (simple validation really)
+                                            if (peers[peerId].Connection && peers[peerId].EndPoint.ToString() == frame.Endpoint.ToString())
+                                            {
+                                                uint srcId = FneUtils.Bytes3ToUInt32(buffer, 0);
+                                                if (UnitDeregistration != null)
+                                                    UnitDeregistration(peerId, srcId);
                                             }
                                         }
                                     }

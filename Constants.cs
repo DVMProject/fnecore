@@ -141,7 +141,6 @@ namespace fnecore
         public const uint RtpGenericClockRate = 8000;
 
         public const byte DVMRtpPayloadType = 0x56;
-        public const byte DVMRtpControlPayloadType = 0x57;
         public const byte DVMFrameStart = 0xFE;
 
         /*
@@ -178,6 +177,12 @@ namespace fnecore
         public const byte NET_FUNC_TRANSFER = 0x90;                             // Network Transfer Function
         public const byte NET_TRANSFER_SUBFUNC_ACTIVITY = 0x01;                 // Activity Log Transfer
         public const byte NET_TRANSFER_SUBFUNC_DIAG = 0x02;                     // Diagnostic Log Transfer
+
+        public const byte NET_FUNC_ANNOUNCE = 0x91U;                            // Network Announce Function
+        public const byte NET_ANNC_SUBFUNC_GRP_AFFIL = 0x00U;                   // Announce Group Affiliation
+        public const byte NET_ANNC_SUBFUNC_UNIT_REG = 0x01U;                    // Announce Unit Registration
+        public const byte NET_ANNC_SUBFUNC_UNIT_DEREG = 0x02U;                  // Announce Unit Deregistration
+        public const byte NET_ANNC_SUBFUNC_AFFILS = 0x90U;                      // Update All Affiliations
 
         /*
         ** Protocol Tags (as strings)
