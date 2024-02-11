@@ -1121,7 +1121,7 @@ namespace fnecore
 
                         case Constants.NET_FUNC_ANNOUNCE:
                             {
-                                else if (fneHeader.SubFunction == Constants.NET_ANNC_SUBFUNC_GRP_AFFIL) // Announce Group Affiliation
+                                if (fneHeader.SubFunction == Constants.NET_ANNC_SUBFUNC_GRP_AFFIL) // Announce Group Affiliation
                                 {
                                     // can we do activity transfers?
                                     if (AllowActivityTransfer)
@@ -1131,8 +1131,8 @@ namespace fnecore
                                             // validate peer (simple validation really
                                             if (peers[peerId].Connection && peers[peerId].EndPoint.ToString() == frame.Endpoint.ToString())
                                             {
-                                                uint srcId = FneUtils.Bytes3ToUInt32(buffer, 0);
-                                                uint dstId = FneUtils.Bytes3ToUInt32(buffer, 3);
+                                                uint srcId = FneUtils.Bytes3ToUInt32(message, 0);
+                                                uint dstId = FneUtils.Bytes3ToUInt32(message, 3);
                                                 if (UnitGroupAffiliation != null)
                                                     UnitGroupAffiliation(peerId, srcId, dstId);
                                             }
@@ -1149,7 +1149,7 @@ namespace fnecore
                                             // validate peer (simple validation really
                                             if (peers[peerId].Connection && peers[peerId].EndPoint.ToString() == frame.Endpoint.ToString())
                                             {
-                                                uint srcId = FneUtils.Bytes3ToUInt32(buffer, 0);
+                                                uint srcId = FneUtils.Bytes3ToUInt32(message, 0);
                                                 if (UnitRegistration != null)
                                                     UnitRegistration(peerId, srcId);
                                             }
@@ -1166,7 +1166,7 @@ namespace fnecore
                                             // validate peer (simple validation really)
                                             if (peers[peerId].Connection && peers[peerId].EndPoint.ToString() == frame.Endpoint.ToString())
                                             {
-                                                uint srcId = FneUtils.Bytes3ToUInt32(buffer, 0);
+                                                uint srcId = FneUtils.Bytes3ToUInt32(message, 0);
                                                 if (UnitDeregistration != null)
                                                     UnitDeregistration(peerId, srcId);
                                             }

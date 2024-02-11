@@ -178,11 +178,11 @@ namespace fnecore
         public const byte NET_TRANSFER_SUBFUNC_ACTIVITY = 0x01;                 // Activity Log Transfer
         public const byte NET_TRANSFER_SUBFUNC_DIAG = 0x02;                     // Diagnostic Log Transfer
 
-        public const byte NET_FUNC_ANNOUNCE = 0x91U;                            // Network Announce Function
-        public const byte NET_ANNC_SUBFUNC_GRP_AFFIL = 0x00U;                   // Announce Group Affiliation
-        public const byte NET_ANNC_SUBFUNC_UNIT_REG = 0x01U;                    // Announce Unit Registration
-        public const byte NET_ANNC_SUBFUNC_UNIT_DEREG = 0x02U;                  // Announce Unit Deregistration
-        public const byte NET_ANNC_SUBFUNC_AFFILS = 0x90U;                      // Update All Affiliations
+        public const byte NET_FUNC_ANNOUNCE = 0x91;                             // Network Announce Function
+        public const byte NET_ANNC_SUBFUNC_GRP_AFFIL = 0x00;                    // Announce Group Affiliation
+        public const byte NET_ANNC_SUBFUNC_UNIT_REG = 0x01;                     // Announce Unit Registration
+        public const byte NET_ANNC_SUBFUNC_UNIT_DEREG = 0x02;                   // Announce Unit Deregistration
+        public const byte NET_ANNC_SUBFUNC_AFFILS = 0x90;                       // Update All Affiliations
 
         /*
         ** Protocol Tags (as strings)
