@@ -271,7 +271,7 @@ namespace fnecore
 
             ushort curr = currPktSeq;
             ++currPktSeq;
-            if (currPktSeq > ushort.MaxValue)
+            if (currPktSeq > (Constants.RtpCallEndSeq - 1))
                 currPktSeq = 0;
 
             return curr;

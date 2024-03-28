@@ -140,6 +140,8 @@ namespace fnecore
         public const ushort RtpFNEHeaderExtLength = 4; // length of FNE header in 32-bit units
         public const uint RtpGenericClockRate = 8000;
 
+        public const ushort RtpCallEndSeq = 65535;
+
         public const byte DVMRtpPayloadType = 0x56;
         public const byte DVMFrameStart = 0xFE;
 
