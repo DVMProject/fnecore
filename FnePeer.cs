@@ -232,9 +232,10 @@ namespace fnecore
         /// <param name="message">Byte array containing message to send</param>
         /// <param name="pktSeq">RTP Packet Sequence</param>
         /// <param name="streamId"></param>
-        public void SendMaster(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0)
+        /// <param name="forceZeroStream"></param>
+        public void SendMaster(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
         {
-            if (streamId == 0)
+            if (streamId == 0 && !forceZeroStream)
                 streamId = this.streamId;
 
             Send(new UdpFrame()
@@ -267,7 +268,7 @@ namespace fnecore
             FneUtils.Write3Bytes(srcId, ref res, 0);
             FneUtils.Write3Bytes(dstId, ref res, 3);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0);
+            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
         }
 
         /// <summary>
@@ -281,7 +282,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0);
+            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
         }
 
         /// <summary>
@@ -295,7 +296,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0);
+            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
         }
 
         /// <summary>
