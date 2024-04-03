@@ -123,7 +123,7 @@ namespace fnecore
     /// </summary>
     public abstract class FneSystemBase
     {
-        protected FneBase fne;
+        protected FnePeer fne;
 
         protected const int DMR_FRAME_LENGTH_BYTES = 33;
         protected const int DMR_PACKET_SIZE = 55;
@@ -178,19 +178,6 @@ namespace fnecore
             }
         }
 
-        /// <summary>
-        /// Gets the <see cref="FneType"/> this <see cref="FneBase"/> is.
-        /// </summary>
-        public FneType FneType
-        {
-            get
-            {
-                if (fne != null)
-                    return fne.FneType;
-                return FneType.UNKNOWN;
-            }
-        }
-
         /*
         ** Methods
         */
@@ -198,9 +185,9 @@ namespace fnecore
         /// <summary>
         /// Initializes a new instance of the <see cref="FneSystemBase"/> class.
         /// </summary>
-        /// <param name="fne">Instance of <see cref="FneMaster"/> or <see cref="FnePeer"/></param>
+        /// <param name="fne">Instance of <see cref="FnePeer"/></param>
         /// <param name="fneLogLevel"></param>
-        public FneSystemBase(FneBase fne, LogLevel fneLogLevel = LogLevel.INFO)
+        public FneSystemBase(FnePeer fne, LogLevel fneLogLevel = LogLevel.INFO)
         {
             this.fne = fne;
 
@@ -490,22 +477,9 @@ namespace fnecore
             Buffer.BlockCopy(raw, 0, payload, 24, raw.Length);
             payload[23U] = (byte)(P25_MSG_HDR_SIZE + raw.Length);
 
-            // what type of FNE are we?
-            if (FneType == FneType.MASTER)
-            {
-                FneMaster master = (FneMaster)fne;
-                lock (master.Peers)
-                {
-                    foreach (uint peerId in master.Peers.Keys)
-                        master.SendPeer(peerId, FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, 0, callData.TxStreamID);
-                }
-            }
-            else if (FneType == FneType.PEER)
-            {
-                FnePeer peer = (FnePeer)fne;
-                ushort pktSeq = peer.pktSeq(true);
-                peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
-            }
+            FnePeer peer = (FnePeer)fne;
+            ushort pktSeq = peer.pktSeq(true);
+            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
         }
 
         /// <summary>
@@ -523,22 +497,9 @@ namespace fnecore
             if (grantDemand)
                 payload[14U] |= 0x80;
 
-            // what type of FNE are we?
-            if (FneType == FneType.MASTER)
-            {
-                FneMaster master = (FneMaster)fne;
-                lock (master.Peers)
-                {
-                    foreach (uint peerId in master.Peers.Keys)
-                        master.SendPeer(peerId, FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, 0, callData.TxStreamID);
-                }
-            }
-            else if (FneType == FneType.PEER)
-            {
-                FnePeer peer = (FnePeer)fne;
-                ushort pktSeq = peer.pktSeq(true);
-                peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
-            }
+            FnePeer peer = (FnePeer)fne;
+            ushort pktSeq = peer.pktSeq(true);
+            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
         }
     } // public abstract class FneSystemBase
 } // namespace fnecore

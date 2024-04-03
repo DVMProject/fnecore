@@ -130,8 +130,6 @@ namespace fnecore
         /// <param name="endpoint"></param>
         public FnePeer(string systemName, uint peerId, IPEndPoint endpoint) : base(systemName, peerId)
         {
-            fneType = FneType.PEER;
-
             masterEndpoint = endpoint;
             client = new UdpReceiver();
 
@@ -143,7 +141,7 @@ namespace fnecore
         }
 
         /// <summary>
-        /// Starts the main execution loop for this <see cref="FneMaster"/>.
+        /// Starts the main execution loop for this <see cref="FnePeer"/>.
         /// </summary>
         public override void Start()
         {
@@ -170,7 +168,7 @@ namespace fnecore
         }
 
         /// <summary>
-        /// Stops the main execution loop for this <see cref="FneMaster"/>.
+        /// Stops the main execution loop for this <see cref="FnePeer"/>.
         /// </summary>
         public override void Stop()
         {
@@ -254,6 +252,50 @@ namespace fnecore
         public void SendMaster(Tuple<byte, byte> opcode, byte[] message)
         {
             SendMaster(opcode, message, pktSeq());
+        }
+
+        /// <summary>
+        /// Helper to send group affiliation announcements to the master.
+        /// </summary>
+        /// <param name="srcId"></param>
+        /// <param name="dstId"></param>
+        public void SendMasterGroupAffiliation(uint srcId, uint dstId)
+        {
+            // send message to master
+            byte[] res = new byte[6];
+
+            FneUtils.Write3Bytes(srcId, ref res, 0);
+            FneUtils.Write3Bytes(dstId, ref res, 3);
+
+            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0);
+        }
+
+        /// <summary>
+        /// Helper to send unit registration announcements to the master.
+        /// </summary>
+        /// <param name="srcId"></param>
+        public void SendMasterUnitRegistration(uint srcId)
+        {
+            // send message to master
+            byte[] res = new byte[3];
+
+            FneUtils.Write3Bytes(srcId, ref res, 0);
+
+            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0);
+        }
+
+        /// <summary>
+        /// Helper to send unit deregistration announcements to the master.
+        /// </summary>
+        /// <param name="srcId"></param>
+        public void SendMasterUnitDeRegistration(uint srcId)
+        {
+            // send message to master
+            byte[] res = new byte[3];
+
+            FneUtils.Write3Bytes(srcId, ref res, 0);
+
+            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0);
         }
 
         /// <summary>

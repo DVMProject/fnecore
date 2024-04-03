@@ -523,26 +523,6 @@ namespace fnecore
     } // public class PeerConnectedEvent : EventArgs
 
     /// <summary>
-    /// Type of FNE instance.
-    /// </summary>
-    public enum FneType : byte
-    {
-        /// <summary>
-        /// Master
-        /// </summary>
-        MASTER,
-        /// <summary>
-        /// Peer
-        /// </summary>
-        PEER,
-        /// <summary>
-        /// Unknown (should never happen)
-        /// </summary>
-        UNKNOWN = 0xFF
-    } // public enum FneType : byte
-
-
-    /// <summary>
     /// This class implements some base functionality for all other FNE network classes.
     /// </summary>
     public abstract class FneBase
@@ -553,7 +533,6 @@ namespace fnecore
         protected static Random rand = null;
 
         protected bool isStarted = false;
-        protected FneType fneType;
 
         /*
         ** Properties
@@ -573,11 +552,6 @@ namespace fnecore
         /// Flag indicating whether this <see cref="FneBase"/> is running.
         /// </summary>
         public bool IsStarted => isStarted;
-
-        /// <summary>
-        /// Gets the <see cref="FneType"/> this <see cref="FneBase"/> is.
-        /// </summary>
-        public FneType FneType => fneType;
 
         /// <summary>
         /// Gets/sets the interval that peers will need to ping the master.
@@ -690,8 +664,6 @@ namespace fnecore
         {
             this.systemName = systemName;
             this.peerId = peerId;
-
-            this.fneType = FneType.UNKNOWN;
 
             // set a default "noop" logger
             Logger = (LogLevel level, string message) => { };
