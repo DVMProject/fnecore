@@ -268,7 +268,7 @@ namespace fnecore
             FneUtils.Write3Bytes(srcId, ref res, 0);
             FneUtils.Write3Bytes(dstId, ref res, 3);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
+            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
         }
 
         /// <summary>
@@ -282,7 +282,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
+            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
         }
 
         /// <summary>
@@ -296,7 +296,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_TRANSFER, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
+            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
         }
 
         /// <summary>
