@@ -184,6 +184,7 @@ namespace fnecore
         public const byte NET_ANNC_SUBFUNC_GRP_AFFIL = 0x00;                    // Announce Group Affiliation
         public const byte NET_ANNC_SUBFUNC_UNIT_REG = 0x01;                     // Announce Unit Registration
         public const byte NET_ANNC_SUBFUNC_UNIT_DEREG = 0x02;                   // Announce Unit Deregistration
+        public const byte NET_ANNC_SUBFUNC_GRP_UNAFFIL = 0x03;                  // Announce Group Affiliation Removal
         public const byte NET_ANNC_SUBFUNC_AFFILS = 0x90;                       // Update All Affiliations
 
         /*

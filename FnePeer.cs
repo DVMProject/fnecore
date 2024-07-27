@@ -269,6 +269,21 @@ namespace fnecore
             FneUtils.Write3Bytes(dstId, ref res, 3);
 
             SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
+
+        }
+
+        /// <summary>
+        /// Helper to send group affiliation removal announcement to the master.
+        /// </summary>
+        /// <param name="srcId"></param>
+        public void SendMasterGroupAffiliationRemoval(uint srcId)
+        {
+            // send message to master
+            byte[] res = new byte[3];
+
+            FneUtils.Write3Bytes(srcId, ref res, 0);
+
+            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_UNAFFIL), res, 0, 0, true);
         }
 
         /// <summary>
