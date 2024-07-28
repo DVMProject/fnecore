@@ -8,6 +8,7 @@
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
 *   Copyright (C) 2022-2023 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2024 Caleb, KO4UYJ
 *
 */
 
@@ -117,7 +118,7 @@ namespace fnecore
         /// <param name="peerId"></param>
         /// <param name="address"></param>
         /// <param name="port"></param>
-        public FnePeer(string systemName, uint peerId, string address, int port) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port))
+        public FnePeer(string systemName, uint peerId, string address, int port, string PresharedKey = null) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), PresharedKey)
         {
             /* stub */
         }
@@ -128,10 +129,13 @@ namespace fnecore
         /// <param name="systemName"></param>
         /// <param name="peerId"></param>
         /// <param name="endpoint"></param>
-        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint) : base(systemName, peerId)
+        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string PresharedKey = null) : base(systemName, peerId)
         {
             masterEndpoint = endpoint;
             client = new UdpReceiver();
+
+            if (PresharedKey != null)
+                client.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(PresharedKey));
 
             info = new PeerInformation();
             info.PeerID = peerId;

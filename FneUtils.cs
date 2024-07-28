@@ -8,6 +8,7 @@
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
 *   Copyright (C) 2022-2024 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2024 Caleb, KO4UYJ
 *
 */
 
@@ -617,6 +618,62 @@ namespace fnecore
                 result[i] = (char)data[i + offset];
 
             return new string(result);
+        }
+
+        /// <summary>
+        /// Converts a hexadecimal string to a byte array.
+        /// </summary>
+        /// <param name="hexString">The hexadecimal string.</param>
+        /// <returns>The byte array.</returns>
+        public static byte[] HexStringToByteArray(string hexString)
+        {
+            // Remove any spaces or non-hex characters if necessary
+            hexString = hexString.Replace(" ", "").Replace("-", "");
+
+            // Ensure the string length is even
+            if (hexString.Length % 2 != 0)
+                throw new ArgumentException("Invalid hex string length.");
+
+            byte[] byteArray = new byte[hexString.Length / 2];
+
+            for (int i = 0; i < hexString.Length; i += 2)
+            {
+                byteArray[i / 2] = Convert.ToByte(hexString.Substring(i, 2), 16);
+            }
+
+            return byteArray;
+        }
+
+        /// <summary>
+        /// Converts a hexadecimal string to a byte array for preshared key.
+        /// </summary>
+        /// <param name="hexString">The hexadecimal string.</param>
+        /// <param name="keyLength">The expected key length in bytes.</param>
+        /// <returns>The byte array.</returns>
+        public static byte[] ConvertHexStringToPresharedKey(string hexString)
+        {
+            if (hexString.Length == 32)
+            {
+                // Double the key if it's 32 characters (16 hex pairs)
+                hexString += hexString;
+                Console.WriteLine("Half-length network preshared encryption key detected, doubling key on itself.");
+            }
+
+            if (hexString.Length == 64)
+            {
+                if (hexString.All(c => "0123456789abcdefABCDEF".Contains(c)))
+                {
+                    return HexStringToByteArray(hexString);
+                }
+                else
+                {
+                    throw new ArgumentException("Invalid characters in the network preshared encryption key.");
+                }
+            }
+            else
+            {
+                throw new ArgumentException("Invalid network preshared encryption key length, key should be 32 hex pairs, or 64 characters.");
+            }
         }
 
         /// <summary>

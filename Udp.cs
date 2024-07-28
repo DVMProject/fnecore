@@ -87,7 +87,6 @@ namespace fnecore
         public async Task<UdpFrame> Receive()
         {
             UdpReceiveResult res = await client.ReceiveAsync();
-
             byte[] buffer = res.Buffer;
 
             // are we crypto wrapped?
@@ -100,32 +99,27 @@ namespace fnecore
                 ushort magic = FneUtils.ToUInt16(res.Buffer, 0);
                 if (magic == AES_WRAPPED_PCKT_MAGIC)
                 {
-                    int cryptedLen = (res.Buffer.Length - 2) * sizeof(byte);
-                    byte[] cryptoBuffer = new byte[res.Buffer.Length - 2];
-                    Buffer.BlockCopy(res.Buffer, 0, cryptoBuffer, 0, res.Buffer.Length - 2);
-
-                    // do we need to pad the original buffer to be block aligned?
-                    if (cryptedLen % AES_BLOCK_SIZE != 0)
-                    {
-                        int alignment = AES_BLOCK_SIZE - (cryptedLen % AES_BLOCK_SIZE);
-                        cryptedLen += alignment;
-
-                        // reallocate buffer and copy
-                        cryptoBuffer = new byte[cryptedLen];
-                        Buffer.BlockCopy(res.Buffer, 0, cryptoBuffer, 0, res.Buffer.Length - 2);
-                    }
+                    int cryptedLen = res.Buffer.Length - 2;
+                    byte[] cryptoBuffer = new byte[cryptedLen];
+                    Buffer.BlockCopy(res.Buffer, 2, cryptoBuffer, 0, cryptedLen);
 
                     // decrypt
                     byte[] decrypted = Decrypt(cryptoBuffer, presharedKey);
 
-                    // finalize, cleanup buffers and replace with new
+                    // finalize, cleanup buffers, and replace with new
                     if (decrypted != null)
+                    {
                         buffer = decrypted;
+                    }
                     else
+                    {
                         buffer = new byte[0];
+                    }
                 }
                 else
+                {
                     buffer = new byte[0]; // this will effectively discard packets without the packet magic
+                }
             }
 
             return new UdpFrame()
@@ -174,7 +168,6 @@ namespace fnecore
         /// <returns></returns>
         protected static byte[] Decrypt(byte[] buffer, byte[] key)
         {
-            byte[] decrypted = null;
             using (AesManaged aes = new AesManaged()
             {
                 KeySize = 256,
@@ -186,20 +179,14 @@ namespace fnecore
             })
             {
                 ICryptoTransform decryptor = aes.CreateDecryptor();
-                using (MemoryStream ms = new MemoryStream())
+                using (MemoryStream ms = new MemoryStream(buffer))
                 using (CryptoStream cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
+                using (MemoryStream resultStream = new MemoryStream())
                 {
-                    byte[] outBuf = new byte[16384];
-                    int len = cs.Read(outBuf, 0, outBuf.Length);
-                    if (len > 0)
-                    {
-                        decrypted = new byte[len];
-                        Buffer.BlockCopy(outBuf, 0, decrypted, 0, len);
-                    }
+                    cs.CopyTo(resultStream);
+                    return resultStream.ToArray();
                 }
             }
-
-            return decrypted;
         }
     } // public abstract class UDPBase
 
@@ -289,36 +276,32 @@ namespace fnecore
                 if (presharedKey == null)
                     throw new InvalidOperationException("tried to read datagram encrypted with no key? this shouldn't happen BUGBUG");
 
-                int cryptedLen = buffer.Length * sizeof(byte);
-                byte[] cryptoBuffer = new byte[buffer.Length];
+                // calculate the length of the encrypted data
+                int cryptedLen = buffer.Length;
+
+                // calculate the padding needed to make the buffer a multiple of AES_BLOCK_SIZE
+                int paddingLen = AES_BLOCK_SIZE - (cryptedLen % AES_BLOCK_SIZE);
+                if (paddingLen == AES_BLOCK_SIZE)
+                {
+                    paddingLen = 0; // no padding needed if already a multiple of AES_BLOCK_SIZE
+                }
+
+                byte[] cryptoBuffer = new byte[cryptedLen + paddingLen];
                 Buffer.BlockCopy(buffer, 0, cryptoBuffer, 0, buffer.Length);
 
-                // do we need to pad the original buffer to be block aligned?
-                if (cryptedLen % AES_BLOCK_SIZE != 0)
-                {
-                    int alignment = AES_BLOCK_SIZE - (cryptedLen % AES_BLOCK_SIZE);
-                    cryptedLen += alignment;
-
-                    // reallocate buffer and copy
-                    cryptoBuffer = new byte[cryptedLen];
-                    Buffer.BlockCopy(buffer, 0, cryptoBuffer, 0, buffer.Length);
-                }
-
-                // encrypt
+                // encrypt the buffer
                 byte[] crypted = Encrypt(cryptoBuffer, presharedKey);
 
-                // finalize, cleanup buffers and replace with new
-                buffer = new byte[cryptedLen + 2];
-                if (crypted != null)
-                {
-                    Buffer.BlockCopy(crypted, 0, buffer, 2, cryptedLen);
-                    FneUtils.WriteBytes(AES_WRAPPED_PCKT_MAGIC, ref buffer, 0);
-                }
-                else
-                    return;
+                // create the final buffer with the magic number and encrypted data
+                buffer = new byte[crypted.Length + 2];
+                Buffer.BlockCopy(crypted, 0, buffer, 2, crypted.Length);
+                FneUtils.WriteBytes(AES_WRAPPED_PCKT_MAGIC, ref buffer, 0);
+
+                // set the length to the actual length of the buffer to be sent
+                frame.Message = buffer;
             }
 
-            client.Send(buffer, frame.Message.Length);
+            client.Send(frame.Message, frame.Message.Length);
         }
     } // public class UdpReceiver : UdpBase
 } // namespace fnecore
