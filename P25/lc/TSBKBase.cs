@@ -1,4 +1,18 @@
-﻿using System;
+﻿// SPDX-License-Identifier: AGPL-3.0-only
+/**
+* Digital Voice Modem - Fixed Network Equipment Core Library
+* AGPLv3 Open Source. Use is subject to license terms.
+* DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+*
+* @package DVM / Fixed Network Equipment Core Library
+* @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
+*
+*   Copyright (C) 2024 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2024 Caleb, K4PHP
+*
+*/
+
+using System;
 
 using fnecore.EDAC;
 
