@@ -33,7 +33,7 @@ namespace fnecore.P25.LC.TSBK
         /// <param name="srcId"></param>
         /// <param name="aivFlag"></param>
         /// <param name="service"></param>
-        public IOSP_ACK_RSP(uint dstId, uint srcId, bool aivFlag, byte service)
+        public IOSP_ACK_RSP(uint dstId = 0, uint srcId = 0, bool aivFlag = false, byte service = 0x00)
         {
             DstId = dstId;
             SrcId = srcId;

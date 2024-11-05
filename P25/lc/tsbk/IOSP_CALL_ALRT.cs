@@ -26,7 +26,7 @@ namespace fnecore.P25.LC.TSBK
         /// </summary>
         /// <param name="dstId"></param>
         /// <param name="srcId"></param>
-        public IOSP_CALL_ALRT(uint dstId, uint srcId)
+        public IOSP_CALL_ALRT(uint dstId = 0, uint srcId = 0)
         {
             DstId = dstId;
             SrcId = srcId;
