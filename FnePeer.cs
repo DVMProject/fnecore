@@ -24,6 +24,9 @@ using System.Text.Json;
 using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
+using System.Collections.Generic;
+using System.Net.NetworkInformation;
+using System.Linq;
 
 namespace fnecore
 {
@@ -273,7 +276,29 @@ namespace fnecore
             FneUtils.Write3Bytes(dstId, ref res, 3);
 
             SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
+        }
 
+        /// <summary>
+        /// Helper to send group affiliation dictionary to the master
+        /// </summary>
+        /// <param name="affs"></param>
+        public void SendMasterAffiliationUpdate(List<Tuple<uint, uint>> affs)
+        {
+            int bufferSize = 4 + (affs.Count * 8);
+            byte[] buffer = new byte[bufferSize];
+
+            FneUtils.WriteBytes((uint)affs.Count, ref buffer, 0);
+
+            int offset = 4;
+            foreach (var entry in affs)
+            {
+                FneUtils.Write3Bytes(entry.Item1, ref buffer, offset);
+                FneUtils.Write3Bytes(entry.Item2, ref buffer, offset + 4);
+
+                offset += 8;
+            }
+
+            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_AFFILS), buffer, 0, 0, true);
         }
 
         /// <summary>
