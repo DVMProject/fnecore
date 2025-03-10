@@ -565,6 +565,10 @@ namespace fnecore
                                                     jsonWriter.WriteNumber("rxFrequency", info.Details.RxFrequency);
                                                     jsonWriter.WriteNumber("txFrequency", info.Details.TxFrequency);
 
+                                                    // peer types
+                                                    jsonWriter.WriteBoolean("externalPeer", info.Details.ExternalPeer);
+                                                    jsonWriter.WriteBoolean("conventionalPeer", info.Details.ConventionalPeer);
+
                                                     // system info
                                                     {
                                                         jsonWriter.WritePropertyName("info");

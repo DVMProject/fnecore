@@ -41,6 +41,15 @@ namespace fnecore
         public uint TxFrequency;
 
         /// <summary>
+        /// Exteral Peer
+        /// </summary>
+        public bool ExternalPeer;
+        /// <summary>
+        /// Conventional Peer
+        /// </summary>
+        public bool ConventionalPeer;
+
+        /// <summary>
         /// Software Identifier
         /// </summary>
         public string Software;
