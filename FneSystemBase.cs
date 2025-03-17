@@ -205,6 +205,8 @@ namespace fnecore
             this.fne.PeerIgnored = PeerIgnored;
             this.fne.PeerConnected += PeerConnected;
 
+            this.fne.KeyResponse += KeyResponse;
+
             // hook logger callback
             this.fne.LogLevel = fneLogLevel;
         }
@@ -318,6 +320,13 @@ namespace fnecore
         /// <param name="sender"></param>
         /// <param name="e"></param>
         protected abstract void PeerConnected(object sender, PeerConnectedEvent e);
+
+        /// <summary>
+        /// Event handler used to handle a key response
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        protected abstract void KeyResponse(object sender, KeyResponseEvent e);
 
         /// <summary>
         /// Creates an DMR frame message.

@@ -172,6 +172,8 @@ namespace fnecore
         public const byte NET_FUNC_PONG = 0x75;                                 // Pong
 
         public const byte NET_FUNC_GRANT = 0x7A;                                // Grant Request
+        public const byte NET_FUNC_KEY_REQ = 0x7C;                              // Encryption Key Request
+        public const byte NET_FUNC_KEY_RSP = 0x7D;                              // Encryption Key Response
 
         public const byte NET_FUNC_ACK = 0x7E;                                  // Packet Acknowledge
         public const byte NET_FUNC_NAK = 0x7F;                                  // Packet Negative Acknowledge

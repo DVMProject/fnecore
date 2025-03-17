@@ -19,6 +19,7 @@ using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
 using fnecore.EDAC;
+using fnecore.P25.kmm;
 
 namespace fnecore
 {
@@ -530,6 +531,37 @@ namespace fnecore
             this.Information = peer;
         }
     } // public class PeerConnectedEvent : EventArgs
+    
+    /// <summary>
+    /// Event called when a kmm key response is received
+    /// </summary>
+    public class KeyResponseEvent : EventArgs
+    {
+        /// <summary>
+        /// KMM Message Id
+        /// </summary>
+        public byte MessageId { get; set; }
+
+        /// <summary>
+        /// <see cref="KmmModifyKey"/> instance
+        /// </summary>
+        public KmmModifyKey KmmKey { get; set; }
+
+        /// <summary>
+        /// Raw Data
+        /// </summary>
+        public byte[] Data { get; set; }
+
+        /*
+        ** Methods
+        */
+        public KeyResponseEvent(byte messageId, KmmModifyKey kmmKey, byte[] data) : base()
+        {
+            this.MessageId = messageId;
+            this.KmmKey = kmmKey;
+            this.Data = data;
+        }
+    }
 
     /// <summary>
     /// This class implements some base functionality for all other FNE network classes.
@@ -637,6 +669,11 @@ namespace fnecore
         /// Callback action that handles when a peer disconnects.
         /// </summary>
         public Action<uint> PeerDisconnected = null;
+
+        /// <summary>
+        /// Event action thats called when a key response is received
+        /// </summary>
+        public event EventHandler<KeyResponseEvent> KeyResponse;
 
         /// <summary>
         /// Callback action that handles internal logging.
@@ -831,6 +868,7 @@ namespace fnecore
 
             Buffer.BlockCopy(message, 0, buffer, (int)(Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes + Constants.RtpFNEHeaderLengthBytes),
                     message.Length);
+
             return buffer;
         }
 
@@ -882,6 +920,16 @@ namespace fnecore
         {
             if (PeerConnected != null)
                 PeerConnected.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the key response event
+        /// </summary>
+        /// <param name="e"></param>
+        protected void FireKeyResponse(KeyResponseEvent e)
+        {
+            if (KeyResponse != null)
+                KeyResponse.Invoke(this, e);
         }
     } // public abstract class FneBase
 } // namespace fnecore

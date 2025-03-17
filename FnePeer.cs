@@ -27,6 +27,7 @@ using fnecore.NXDN;
 using System.Collections.Generic;
 using System.Net.NetworkInformation;
 using System.Linq;
+using fnecore.P25.kmm;
 
 namespace fnecore
 {
@@ -341,6 +342,40 @@ namespace fnecore
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
             SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
+        }
+
+        /// <summary>
+        /// Helper to send a key request to the master
+        /// </summary>
+        /// <param name="algId"></param>
+        /// <param name="kId"></param>
+        public void SendMasterKeyRequest(byte algId, ushort kId)
+        {
+            byte[] res = new byte[32];
+
+            KmmModifyKey modifyKey = new KmmModifyKey
+            {
+                AlgId = algId,
+                KeyId = kId
+            };
+
+            KeysetItem ks = new KeysetItem
+            {
+                KeysetId = 0,
+                AlgId = algId,
+                KeyLength = 32
+            };
+
+            modifyKey.KeysetItem = ks;
+            modifyKey.MessageLength = 21;
+
+            byte[] payload = new byte[modifyKey.MessageLength];
+
+            modifyKey.Encode(payload);
+
+            Array.Copy(payload, 0, res, 11, payload.Length);
+
+            SendMaster(CreateOpcode(Constants.NET_FUNC_KEY_REQ, Constants.NET_SUBFUNC_NOP), res, Constants.RtpCallEndSeq, 0, true);
         }
 
         /// <summary>
@@ -670,6 +705,26 @@ namespace fnecore
                                     {
                                         PingsAcked++;
                                         Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTPONG received, pongs since connected {PingsAcked}");
+                                    }
+                                }
+                                break;
+                            case Constants.NET_FUNC_KEY_RSP:                                               // Key Response
+                                if (this.peerId == peerId)
+                                {
+                                    byte[] payload = message.Skip(11).ToArray();
+
+                                    byte messageId = payload[0];
+
+                                    if (messageId == (byte)KmmMessageType.MODIFY_KEY_CMD)
+                                    {
+                                        KmmModifyKey modifyKey = new KmmModifyKey();
+                                        modifyKey.Decode(payload);
+
+                                        FireKeyResponse(new KeyResponseEvent(messageId, modifyKey, message));
+                                    }
+                                    else
+                                    {
+                                        Log(LogLevel.WARNING, $"Unknown KEY_RSP Message ID: {messageId}");
                                     }
                                 }
                                 break;

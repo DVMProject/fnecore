@@ -133,8 +133,16 @@ namespace fnecore.P25
         public const byte P25_MFG_STANDARD = 0x00;
 
         public const byte P25_ALGO_UNENCRYPT = 0x80;
+        public const byte P25_ALGO_DES = 0x81;
+        public const byte P25_ALGO_AES = 0x84;
+        public const byte P25_ALGO_ARC4 = 0xAA;
+
+        public const byte KMM_DECRYPT_INSTRUCTION_NONE = 0x00;
+        public const byte KMM_DECRYPT_INSTRUCTION_MI = 0x40;
 
         public const byte P25_MI_LENGTH = 9;
+
+        public const byte KMM_FRAME_LENGTH = 9;
 
         public const byte P25_TSDU_FRAME_LENGTH_BYTES = 45;
 
