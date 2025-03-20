@@ -28,14 +28,12 @@ namespace fnecore.P25
         private byte algId;
         private ushort keyId;
 
+        private byte[] keystream;
         private byte[] messageIndicator = new byte[9];
 
-        private Dictionary<ushort, KeyInfo> keys = new Dictionary<ushort, KeyInfo>();
-
-        private byte[] aesKeystream = new byte[240]; // AES buffer
-        private byte[] adpKeystream = new byte[469]; // ADP buffer
-
         private int ksPosition;
+
+        private KeyInfo currentKey;
 
         /*
         ** Class
@@ -91,7 +89,7 @@ namespace fnecore.P25
         /// </summary>
         public void Reset()
         {
-            keys.Clear();
+            currentKey = null;
         }
 
         /// <summary>
@@ -100,12 +98,14 @@ namespace fnecore.P25
         /// <param name="keyid"></param>
         /// <param name="algid"></param>
         /// <param name="key"></param>
-        public void AddKey(ushort keyid, byte algid, byte[] key)
+        public void SetKey(ushort keyid, byte algid, byte[] key)
         {
             if (keyid == 0 || algid == 0x80)
                 return;
 
-            keys[keyid] = new KeyInfo(algid, key);
+            this.keyId = keyid;
+            this.algId = algid;
+            this.currentKey = new KeyInfo(algid, key);
         }
 
         /// <summary>
@@ -113,9 +113,9 @@ namespace fnecore.P25
         /// </summary>
         /// <param name="keyId"></param>
         /// <returns></returns>
-        public bool HasKey(ushort keyId)
+        public bool HasKey()
         {
-            return keys.ContainsKey(keyId);
+            return currentKey != null;
         }
 
         /// <summary>
@@ -133,18 +133,20 @@ namespace fnecore.P25
 
             Array.Copy(MI, this.messageIndicator, Math.Min(MI.Length, this.messageIndicator.Length));
 
-            if (!keys.ContainsKey(keyid))
+            if (currentKey == null)
                 return false;
 
             this.ksPosition = 0;
 
             if (algid == P25Defines.P25_ALGO_AES)
             {
+                keystream = new byte[240];
                 GenerateAESKeystream();
                 return true;
             }
             else if (algid == P25Defines.P25_ALGO_ARC4)
             {
+                keystream = new byte[469];
                 GenerateARC4Keystream();
                 return true;
             }
@@ -160,7 +162,7 @@ namespace fnecore.P25
         /// <returns></returns>
         public bool Process(byte[] imbe, P25DUID duid)
         {
-            if (!keys.ContainsKey(keyId))
+            if (currentKey == null)
                 return false;
 
             return algId switch
@@ -193,10 +195,10 @@ namespace fnecore.P25
             byte[] permutation = new byte[256];
             byte[] key = new byte[256];
 
-            if (!keys.ContainsKey(keyId))
+            if (currentKey == null)
                 return;
 
-            byte[] keyData = keys[keyId].Key;
+            byte[] keyData = currentKey.Key;
 
             int keySize = keyData.Length;
             int padding = Math.Max(5 - keySize, 0);
@@ -239,7 +241,7 @@ namespace fnecore.P25
                 Swap(permutation, i, j);
 
                 // transform byte
-                adpKeystream[k] = permutation[(permutation[i] + permutation[j]) & 0xFF];
+                keystream[k] = permutation[(permutation[i] + permutation[j]) & 0xFF];
             }
         }
 
@@ -248,10 +250,10 @@ namespace fnecore.P25
         /// </summary>
         private void GenerateAESKeystream()
         {
-            if (!keys.ContainsKey(keyId))
+            if (currentKey == null)
                 return;
 
-            byte[] key = keys[keyId].Key;
+            byte[] key = currentKey.Key;
             byte[] iv = ExpandMIToIV(messageIndicator);
 
             using (var aes = Aes.Create())
@@ -268,10 +270,10 @@ namespace fnecore.P25
                     Array.Copy(iv, input, 16);
                     byte[] output = new byte[16];
 
-                    for (int i = 0; i < aesKeystream.Length / 16; i++)
+                    for (int i = 0; i < keystream.Length / 16; i++)
                     {
                         encryptor.TransformBlock(input, 0, 16, output, 0);
-                        Buffer.BlockCopy(output, 0, aesKeystream, i * 16, 16);
+                        Buffer.BlockCopy(output, 0, keystream, i * 16, 16);
                         Array.Copy(output, input, 16);
                     }
                 }
@@ -294,7 +296,7 @@ namespace fnecore.P25
             ksPosition = (ksPosition + 1) % 9;
 
             for (int j = 0; j < IMBE_BUF_LEN; ++j)
-                imbe[j] ^= aesKeystream[j + offset];
+                imbe[j] ^= keystream[j + offset];
 
             return true;
         }
@@ -318,7 +320,7 @@ namespace fnecore.P25
             ksPosition = (ksPosition + 1) % 9;
 
             for (int j = 0; j < IMBE_BUF_LEN; ++j)
-                imbe[j] ^= adpKeystream[j + offset];
+                imbe[j] ^= keystream[j + offset];
 
             return true;
         }

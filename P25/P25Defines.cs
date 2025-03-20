@@ -121,6 +121,29 @@ namespace fnecore.P25
     } // public enum P25DUID : byte
 
     /// <summary>
+    /// Extended Function types for EXT_FNCT TSBK
+    /// </summary>
+    public enum ExtendedFunction : ushort
+    {
+        CHECK = 0x0000,                        // Radio Check
+        UNINHIBIT = 0x007E,                    // Radio Uninhibit
+        INHIBIT = 0x007F,                      // Radio Inhibit
+        CHECK_ACK = 0x0080,                    // Radio Check Ack
+        UNINHIBIT_ACK = 0x00FE,                // Radio Uninhibit Ack
+        INHIBIT_ACK = 0x00FF,                  // Radio Inhibit Ack
+
+        DYN_REGRP_REQ = 0x0200,                // MFID $90 (Motorola) Dynamic Regroup IR
+        DYN_REGRP_CANCEL = 0x0201,             // MFID $90 (Motorola) Dynamic Regroup IR Cancellation
+        DYN_REGRP_LOCK = 0x0202,               // MFID $90 (Motorola) Lock Selector
+        DYN_REGRP_UNLOCK = 0x0203,             // MFID $90 (Motorola) Unlock Selector
+
+        DYN_REGRP_REQ_ACK = 0x0280,            // MFID $90 (Motorola) Dynamic Regroup IR Ack
+        DYN_REGRP_CANCEL_ACK = 0x0281,         // MFID $90 (Motorola) Dynamic Regroup IR Cancellation Ack
+        DYN_REGRP_LOCK_ACK = 0x0282,           // MFID $90 (Motorola) Lock Selector Ack
+        DYN_REGRP_UNLOCK_ACK = 0x0283          // MFID $90 (Motorola) Unlock Selector Ack
+    } // public enum ExtendedFunction : ushort
+
+    /// <summary>
     /// P25 Constants
     /// </summary>
     public class P25Defines
