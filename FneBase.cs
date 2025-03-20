@@ -19,7 +19,7 @@ using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
 using fnecore.EDAC;
-using fnecore.P25.kmm;
+using fnecore.P25.KMM;
 
 namespace fnecore
 {

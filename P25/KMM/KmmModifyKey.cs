@@ -14,7 +14,7 @@
 using System;
 using System.Linq;
 
-namespace fnecore.P25.kmm
+namespace fnecore.P25.KMM
 {
     /// <summary>
     /// KMM Modify Key

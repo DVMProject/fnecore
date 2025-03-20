@@ -20,14 +20,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
+using System.Collections.Generic;
 
 using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
-using System.Collections.Generic;
-using System.Net.NetworkInformation;
-using System.Linq;
-using fnecore.P25.kmm;
+using fnecore.P25.KMM;
 
 namespace fnecore
 {

@@ -15,7 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace fnecore.P25.kmm
+namespace fnecore.P25.KMM
 {
     /// <summary>
     /// Enc. Key Item

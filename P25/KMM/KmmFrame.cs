@@ -13,7 +13,7 @@
 
 using System;
 
-namespace fnecore.P25.kmm
+namespace fnecore.P25.KMM
 {
     /// <summary>
     /// KMM Frame base class
