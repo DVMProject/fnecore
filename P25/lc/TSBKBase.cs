@@ -27,6 +27,8 @@ namespace fnecore.P25.LC
         protected byte Lco;
         protected byte MfId;
 
+        protected internal byte[] Payload = new byte[P25Defines.P25_TSBK_LENGTH_BYTES - 4];
+
         /// <summary>
         /// Creates an instance of <see cref="TSBKBase"/>
         /// </summary>
@@ -42,7 +44,7 @@ namespace fnecore.P25.LC
         /// <param name="payload"></param>
         /// <param name="rawTSBK"></param>
         /// <returns></returns>
-        public virtual bool Decode(byte[] data, ref byte[] payload, bool rawTSBK)
+        public virtual bool Decode(byte[] data, bool rawTSBK)
         {
             byte[] tsbk = new byte[P25Defines.P25_TSBK_LENGTH_BYTES];
             FneUtils.Memset(tsbk, 0x00, tsbk.Length);
@@ -83,7 +85,7 @@ namespace fnecore.P25.LC
             LastBlock = (tsbk[0] & 0x80) == 0x80;        // Last Block Marker
             MfId = tsbk[1];                              // Manufacturer ID
 
-            Array.Copy(tsbk, 1, payload, 0, P25Defines.P25_TSBK_LENGTH_BYTES - 4);
+            Array.Copy(tsbk, 1, Payload, 0, Payload.Length);
 
             return true;
         }
@@ -95,13 +97,13 @@ namespace fnecore.P25.LC
         /// <param name="payload"></param>
         /// <param name="rawTSBK"></param>
         /// <param name="noTrellis"></param>
-        public virtual void Encode(ref byte[] data, ref byte[] payload, bool rawTSBK, bool noTrellis)
+        public virtual void Encode(ref byte[] data, bool rawTSBK, bool noTrellis)
         {
             byte[] tsbk = new byte[P25Defines.P25_TSBK_LENGTH_BYTES];
 
             FneUtils.Memset(tsbk, 0x00, tsbk.Length);
 
-            Array.Copy(payload, 0, tsbk, 2, P25Defines.P25_TSBK_LENGTH_BYTES - 4);
+            Array.Copy(Payload, 0, tsbk, 2, Payload.Length);
 
             tsbk[0] = Lco;                                      // LCO
             tsbk[0] |= LastBlock ? (byte)0x80 : (byte)0x00;     // Last Block Marker

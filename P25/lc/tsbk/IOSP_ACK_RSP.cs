@@ -48,22 +48,18 @@ namespace fnecore.P25.LC.TSBK
         /// <param name="data"></param>
         /// <param name="rawTSBK"></param>
         /// <returns></returns>
-        public bool Decode(byte[] data, bool rawTSBK)
+        public override bool Decode(byte[] data, bool rawTSBK = true)
         {
-            byte[] tsbk = new byte[P25Defines.P25_TSBK_LENGTH_BYTES];
-            FneUtils.Memset(tsbk, 0x00, tsbk.Length);
-
-            bool ret = base.Decode(data, ref tsbk, rawTSBK);
-            if (!ret)
+            if (!base.Decode(data, rawTSBK))
                 return false;
 
-            ulong tsbkValue = FneUtils.ToUInt64(tsbk, 0);
+            ulong tsbkValue = FneUtils.ToUInt64(Payload, 0);
 
             Aiv = ((tsbkValue >> 56) & 0x80U) == 0x80U;     // Additional Info Flag
             Service = (byte)((tsbkValue >> 56) & 0x3FU);    // Service Type
 
-            DstId = FneUtils.Bytes3ToUInt32(tsbk, 3);       // Target Radio Address
-            SrcId = FneUtils.Bytes3ToUInt32(tsbk, 0);       // Source Radio Address
+            DstId = FneUtils.Bytes3ToUInt32(Payload, 3);       // Target Radio Address
+            SrcId = FneUtils.Bytes3ToUInt32(Payload, 0);       // Source Radio Address
 
             return true;
         }
@@ -75,7 +71,7 @@ namespace fnecore.P25.LC.TSBK
         /// <param name="payload"></param>
         /// <param name="rawTSBK"></param>
         /// <param name="noTrellis"></param>
-        public override void Encode(ref byte[] data, ref byte[] payload, bool rawTSBK, bool noTrellis)
+        public override void Encode(ref byte[] data, bool rawTSBK = true, bool noTrellis = true)
         {
             ulong tsbkValue = 0;
 
@@ -95,10 +91,10 @@ namespace fnecore.P25.LC.TSBK
 
             tsbkValue = (tsbkValue << 24) + SrcId;          // Source Radio Address
 
-            FneUtils.Memset(payload, 0x00, payload.Length);
-            FneUtils.WriteBytes(tsbkValue, ref payload, 0);
+            FneUtils.Memset(Payload, 0x00, Payload.Length);
+            FneUtils.WriteBytes(tsbkValue, ref Payload, 0);
 
-            base.Encode(ref data, ref payload, rawTSBK, noTrellis);
+            base.Encode(ref data, rawTSBK, noTrellis);
         }
     } // public class IOSP_ACK_RSP
 } // namespace fnecore.P25.LC.TSBK
