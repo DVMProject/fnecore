@@ -58,8 +58,8 @@ namespace fnecore.P25.LC.TSBK
             Aiv = ((tsbkValue >> 56) & 0x80U) == 0x80U;     // Additional Info Flag
             Service = (byte)((tsbkValue >> 56) & 0x3FU);    // Service Type
 
-            DstId = FneUtils.Bytes3ToUInt32(Payload, 3);       // Target Radio Address
-            SrcId = FneUtils.Bytes3ToUInt32(Payload, 0);       // Source Radio Address
+            SrcId = FneUtils.Bytes3ToUInt32(Payload, 3);       // Target Radio Address
+            DstId = FneUtils.Bytes3ToUInt32(Payload, 0);       // Source Radio Address
 
             return true;
         }
@@ -86,10 +86,10 @@ namespace fnecore.P25.LC.TSBK
             }
             else
             {
-                tsbkValue = (tsbkValue << 32) + DstId;      // Target Radio Address
+                tsbkValue = (tsbkValue << 32) + SrcId;      // Target Radio Address
             }
 
-            tsbkValue = (tsbkValue << 24) + SrcId;          // Source Radio Address
+            tsbkValue = (tsbkValue << 24) + DstId;          // Source Radio Address
 
             FneUtils.Memset(Payload, 0x00, Payload.Length);
             FneUtils.WriteBytes(tsbkValue, ref Payload, 0);
