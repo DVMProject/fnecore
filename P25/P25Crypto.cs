@@ -309,11 +309,8 @@ namespace fnecore.P25
         /// <returns></returns>
         private bool ARC4Process(byte[] imbe, P25DUID duid)
         {
-            int offset = 256;
-
-            if (duid == P25DUID.LDU1)
-                offset = 0;
-            else if (duid == P25DUID.LDU2)
+            int offset = 0;
+            if (duid == P25DUID.LDU2)
                 offset = 101;
 
             offset += (ksPosition * IMBE_BUF_LEN) + 267 + (ksPosition < 8 ? 0 : 2);
