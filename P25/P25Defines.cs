@@ -160,6 +160,10 @@ namespace fnecore.P25
         public const byte P25_ALGO_AES = 0x84;
         public const byte P25_ALGO_ARC4 = 0xAA;
 
+        public const uint WUID_FNE = 0xFFFFFC;
+        public const uint WUID_REG = 0xFFFFFE;
+        public const uint WUID_ALL = 0xFFFFFF;
+
         public const byte KMM_DECRYPT_INSTRUCTION_NONE = 0x00;
         public const byte KMM_DECRYPT_INSTRUCTION_MI = 0x40;
 
