@@ -93,7 +93,7 @@ namespace fnecore.P25
         }
 
         /// <summary>
-        /// 
+        /// Helper to set the Key Info
         /// </summary>
         /// <param name="keyid"></param>
         /// <param name="algid"></param>
@@ -109,7 +109,7 @@ namespace fnecore.P25
         }
 
         /// <summary>
-        /// 
+        /// Helper to check if the key we have is null
         /// </summary>
         /// <param name="keyId"></param>
         /// <returns></returns>
@@ -119,7 +119,7 @@ namespace fnecore.P25
         }
 
         /// <summary>
-        /// 
+        /// Helper to create key streams based on Algorithm Id
         /// </summary>
         /// <param name="algid"></param>
         /// <param name="keyid"></param>
@@ -142,6 +142,12 @@ namespace fnecore.P25
             {
                 keystream = new byte[240];
                 GenerateAESKeystream();
+                return true;
+            }
+            if (algid == P25Defines.P25_ALGO_DES)
+            {
+                keystream = new byte[224];
+                GenerateDESKeystream();
                 return true;
             }
             else if (algid == P25Defines.P25_ALGO_ARC4)
@@ -169,21 +175,83 @@ namespace fnecore.P25
             {
                 P25Defines.P25_ALGO_AES => AESProcess(imbe, duid),
                 P25Defines.P25_ALGO_ARC4 => ARC4Process(imbe, duid),
+                P25Defines.P25_ALGO_DES => DESProcess(imbe, duid),
                 _ => false
             };
         }
 
         /// <summary>
-        /// 
+        /// Create DES keystream.
         /// </summary>
-        /// <param name="a"></param>
-        /// <param name="i1"></param>
-        /// <param name="i2"></param>
-        private void Swap(byte[] a, int i1, int i2)
+        private void GenerateDESKeystream()
         {
-            byte temp = a[i1];
-            a[i1] = a[i2];
-            a[i2] = temp;
+            if (currentKey == null)
+                return;
+
+            byte[] desKey = new byte[8];
+            int padLen = Math.Max(8 - currentKey.Key.Length, 0);
+            for (int i = 0; i < padLen; i++)
+                desKey[i] = 0;
+            for (int i = padLen; i < 8; i++)
+                desKey[i] = currentKey.Key[i - padLen];
+
+            byte[] iv = new byte[8];
+            Array.Copy(messageIndicator, iv, 8);
+
+            using (var des = DES.Create())
+            {
+                des.Mode = CipherMode.ECB;
+                des.Padding = PaddingMode.None;
+                des.Key = desKey;
+
+                using (var encryptor = des.CreateEncryptor())
+                {
+                    byte[] input = iv;
+                    byte[] output = new byte[8];
+
+                    for (int i = 0; i < 28; i++)
+                    {
+                        encryptor.TransformBlock(input, 0, 8, output, 0);
+                        Array.Copy(output, 0, keystream, i * 8, 8);
+                        input = output.ToArray();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Create AES keystream.
+        /// </summary>
+        private void GenerateAESKeystream()
+        {
+            if (currentKey == null)
+                return;
+
+            byte[] key = currentKey.Key;
+            byte[] iv = ExpandMIToIV(messageIndicator);
+
+            using (var aes = Aes.Create())
+            {
+                aes.KeySize = 256;
+                aes.BlockSize = 128;
+                aes.Key = key.Length == 32 ? key : key.Concat(new byte[32 - key.Length]).ToArray();
+                aes.Mode = CipherMode.ECB;
+                aes.Padding = PaddingMode.None;
+
+                using (var encryptor = aes.CreateEncryptor())
+                {
+                    byte[] input = new byte[16];
+                    Array.Copy(iv, input, 16);
+                    byte[] output = new byte[16];
+
+                    for (int i = 0; i < keystream.Length / 16; i++)
+                    {
+                        encryptor.TransformBlock(input, 0, 16, output, 0);
+                        Buffer.BlockCopy(output, 0, keystream, i * 16, 16);
+                        Array.Copy(output, input, 16);
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -246,38 +314,25 @@ namespace fnecore.P25
         }
 
         /// <summary>
-        /// Create AES keystream.
+        /// Helper to process IMBE audio using DES-OFB
         /// </summary>
-        private void GenerateAESKeystream()
+        /// <param name="imbe"></param>
+        /// <param name="duid"></param>
+        /// <returns></returns>
+        private bool DESProcess(byte[] imbe, P25DUID duid)
         {
-            if (currentKey == null)
-                return;
+            int offset = 8;
 
-            byte[] key = currentKey.Key;
-            byte[] iv = ExpandMIToIV(messageIndicator);
+            if (duid == P25DUID.LDU2)
+                offset += 101;
 
-            using (var aes = Aes.Create())
-            {
-                aes.KeySize = 256;
-                aes.BlockSize = 128;
-                aes.Key = key.Length == 32 ? key : key.Concat(new byte[32 - key.Length]).ToArray();
-                aes.Mode = CipherMode.ECB;
-                aes.Padding = PaddingMode.None;
+            offset += (ksPosition * IMBE_BUF_LEN) + IMBE_BUF_LEN + (ksPosition < 8 ? 0 : 2);
+            ksPosition = (ksPosition + 1) % 9;
 
-                using (var encryptor = aes.CreateEncryptor())
-                {
-                    byte[] input = new byte[16];
-                    Array.Copy(iv, input, 16);
-                    byte[] output = new byte[16];
+            for (int j = 0; j < IMBE_BUF_LEN; ++j)
+                imbe[j] ^= keystream[j + offset];
 
-                    for (int i = 0; i < keystream.Length / 16; i++)
-                    {
-                        encryptor.TransformBlock(input, 0, 16, output, 0);
-                        Buffer.BlockCopy(output, 0, keystream, i * 16, 16);
-                        Array.Copy(output, input, 16);
-                    }
-                }
-            }
+            return true;
         }
 
         /// <summary>
@@ -320,6 +375,19 @@ namespace fnecore.P25
                 imbe[j] ^= keystream[j + offset];
 
             return true;
+        }
+
+        /// <summary>
+        /// Swap two elements in a byte array
+        /// </summary>
+        /// <param name="a"></param>
+        /// <param name="i1"></param>
+        /// <param name="i2"></param>
+        private void Swap(byte[] a, int i1, int i2)
+        {
+            byte temp = a[i1];
+            a[i1] = a[i2];
+            a[i2] = temp;
         }
 
         /// <summary>
