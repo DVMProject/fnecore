@@ -183,7 +183,10 @@ namespace fnecore
                 throw new InvalidOperationException("Cannot stop listening when not started.");
 
             Logger(LogLevel.INFO, $"({systemName}) stopping network services, {masterEndpoint}");
-            
+
+            // send shutdown opcode to server
+            SendMaster(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+
             // stop UDP listen task
             if (listenTask != null)
             {
