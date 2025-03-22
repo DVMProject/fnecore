@@ -488,7 +488,7 @@ namespace fnecore
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
-            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
+            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
         }
 
         /// <summary>
@@ -508,7 +508,7 @@ namespace fnecore
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
-            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, pktSeq, callData.TxStreamID);
+            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
         }
     } // public abstract class FneSystemBase
 } // namespace fnecore
