@@ -808,7 +808,7 @@ namespace fnecore
                         {
                             // send message to master
                             byte[] res = new byte[1];
-                            SendMaster(CreateOpcode(Constants.NET_FUNC_PING), res);
+                            SendMaster(CreateOpcode(Constants.NET_FUNC_PING), res, Constants.RtpCallEndSeq);
 
                             PingsSent++;
                             Log(LogLevel.DEBUG, $"({systemName}) RPTPING sent to MASTER {masterEndpoint}; pings since connected {PingsSent}");
