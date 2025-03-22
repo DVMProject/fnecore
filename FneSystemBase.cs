@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2024 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2024-2025 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -117,6 +117,27 @@ namespace fnecore
             Slot = 0;
         }
     } // public class RemoteCallData
+
+    /// <summary>
+    /// Data structure representing encryption parameters.
+    /// </summary>
+    public class CryptoParams
+    {
+        /// <summary>
+        /// Algorithm ID
+        /// </summary>
+        public byte AlgoId = P25Defines.P25_ALGO_UNENCRYPT;
+
+        /// <summary>
+        /// Encryption Key ID
+        /// </summary>
+        public ushort KeyId = 0;
+
+        /// <summary>
+        /// Message Indicator
+        /// </summary>
+        public byte[] MI = new byte[P25Defines.P25_MI_LENGTH];
+    } // public class CryptoParams
 
     /// <summary>
     /// Implements a FNE system.
@@ -434,7 +455,9 @@ namespace fnecore
         /// </summary>
         /// <param name="duid"></param>
         /// <param name="callData"></param>
-        protected void CreateP25MessageHdr(byte duid, RemoteCallData callData, ref byte[] data)
+        /// <param name="data"></param>
+        /// <param name="cryptoParams"></param>
+        public void CreateP25MessageHdr(byte duid, RemoteCallData callData, ref byte[] data, CryptoParams cryptoParams = null)
         {
             FneUtils.StringToBytes(Constants.TAG_P25_DATA, data, 0, Constants.TAG_P25_DATA.Length);
 
@@ -459,7 +482,19 @@ namespace fnecore
 
             data[22U] = duid;                                                               // DUID
 
-            data[180U] = 0;                                                                 // Frame Type
+            data[180U] = P25Defines.P25_FT_DATA_UNIT;                                       // Frame Type
+            if (cryptoParams != null)
+            {
+                data[180U] = P25Defines.P25_FT_HDU_VALID;                                   // Frame Type
+
+                data[14U] |= 0x08;                                                          // Control bit
+
+                data[181U] = cryptoParams.AlgoId;                                           // Algorithm ID
+                FneUtils.WriteBytes(cryptoParams.KeyId, ref data, 182);                     // Key ID
+
+                if (cryptoParams.MI != null)
+                    Array.Copy(cryptoParams.MI, 0, data, 184, P25Defines.P25_MI_LENGTH);    // Message Indicator
+            }
         }
 
         /// <summary>
