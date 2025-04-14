@@ -66,7 +66,58 @@ namespace fnecore
     } // public enum ConnectionState
 
     /// <summary>
-    /// 
+    /// Peer Connection NAK Messages
+    /// </summary>
+    public enum ConnectionMSTNAK
+    {
+        /// <summary>
+        /// General Failure
+        /// </summary>
+        GENERAL_FAILURE,
+
+        /// <summary>
+        /// Mode Not Enabled
+        /// </summary>
+        MODE_NOT_ENABLED,
+        /// <summary>
+        /// Illegal Packet
+        /// </summary>
+        ILLEGAL_PACKET,
+
+        /// <summary>
+        /// FNE Unauthorized
+        /// </summary>
+        FNE_UNAUTHORIZED,
+        /// <summary>
+        /// Bad Connection State
+        /// </summary>
+        BAD_CONN_STATE,
+        /// <summary>
+        /// Invalid Configuration Data
+        /// </summary>
+        INVALID_CONFIG_DATA,
+        /// <summary>
+        /// Peer Reset
+        /// </summary>
+        PEER_RESET,
+        /// <summary>
+        /// Peer ACL
+        /// </summary>
+        PEER_ACL,
+
+        /// <summary>
+        /// FNE Maximum Connections
+        /// </summary>
+        FNE_MAX_CONN,
+
+        /// <summary>
+        /// Invalid
+        /// </summary>
+        INVALID = 0xFFFF
+    } // public enum ConnectionMSTNAK
+
+    /// <summary>
+    /// Call Type
     /// </summary>
     public enum CallType : byte
     {
@@ -81,7 +132,7 @@ namespace fnecore
     } // public enum CallType : byte
 
     /// <summary>
-    /// 
+    /// Frame Type
     /// </summary>
     public enum FrameType : byte
     {
@@ -105,7 +156,7 @@ namespace fnecore
     } // public enum FrameType : byte
 
     /// <summary>
-    /// 
+    /// DVM State
     /// </summary>
     public enum DVMState : byte
     {

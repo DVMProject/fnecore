@@ -164,11 +164,6 @@ namespace fnecore
         public ConnectionState State;
 
         /// <summary>
-        /// Flag indicating peer is "connected".
-        /// </summary>
-        public bool Connection;
-
-        /// <summary>
         /// Number of pings received.
         /// </summary>
         public int PingsReceived;

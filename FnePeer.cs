@@ -27,6 +27,7 @@ using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
 using fnecore.P25.KMM;
+using System.Net.NetworkInformation;
 
 namespace fnecore
 {
@@ -142,7 +143,7 @@ namespace fnecore
 
             info = new PeerInformation();
             info.PeerID = peerId;
-            info.Connection = false;
+            info.State = ConnectionState.WAITING_LOGIN;
 
             PingsAcked = 0;
         }
@@ -557,8 +558,67 @@ namespace fnecore
                                 {
                                     if (this.peerId == peerId)
                                     {
-                                        info.Connection = false;
-                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTNAK received");
+                                        // DVM 3.6 adds support to respond with a NAK reason, as such we just check if the NAK response is greater
+                                        // then 10 bytes and process the reason value
+                                        ConnectionMSTNAK reason = ConnectionMSTNAK.INVALID;
+                                        if (message.Length > 10)
+                                        {
+                                            reason = (ConnectionMSTNAK)FneUtils.ToUInt16(message, 10);
+                                            switch (reason)
+                                            {
+                                                case ConnectionMSTNAK.MODE_NOT_ENABLED:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; digital mode not enabled on FNE");
+                                                    break;
+                                                case ConnectionMSTNAK.ILLEGAL_PACKET:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; illegal/unknown packet");
+                                                    break;
+                                                case ConnectionMSTNAK.FNE_UNAUTHORIZED:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; unauthorized");
+                                                    break;
+                                                case ConnectionMSTNAK.BAD_CONN_STATE:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; bad connection state");
+                                                    break;
+                                                case ConnectionMSTNAK.INVALID_CONFIG_DATA:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; invalid configuration data");
+                                                    break;
+                                                case ConnectionMSTNAK.FNE_MAX_CONN:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; FNE has reached maximum permitted connections");
+                                                    break;
+                                                case ConnectionMSTNAK.PEER_RESET:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; FNE demanded connection reset");
+                                                    break;
+                                                case ConnectionMSTNAK.PEER_ACL:
+                                                    Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master NAK; ACL rejection, network disabled");
+                                                    info.State = ConnectionState.WAITING_LOGIN;
+                                                    Stop();
+                                                    break;
+
+                                                case ConnectionMSTNAK.GENERAL_FAILURE:
+                                                default:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; general failure");
+                                                    break;
+                                            }
+                                        }
+
+                                        if (info.State == ConnectionState.RUNNING && (reason == ConnectionMSTNAK.FNE_MAX_CONN))
+                                        {
+                                            Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; attemping to relogin");
+
+                                            // reset states
+                                            PingsSent = 0;
+                                            PingsAcked = 0;
+                                            info.State = ConnectionState.WAITING_LOGIN;
+                                        }
+                                        else
+                                        {
+                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master NAK; network reconnect");
+
+                                            // reset states
+                                            PingsSent = 0;
+                                            PingsAcked = 0;
+                                            info.State = ConnectionState.WAITING_LOGIN;
+                                            return;
+                                        }
                                     }
                                 }
                                 break;
@@ -664,7 +724,6 @@ namespace fnecore
                                         else
                                         {
                                             info.State = ConnectionState.WAITING_LOGIN;
-                                            info.Connection = false;
                                             Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master ACK contained wrong ID - connection reset");
                                         }
                                     }
@@ -672,7 +731,6 @@ namespace fnecore
                                     {
                                         if (this.peerId == peerId)
                                         {
-                                            info.Connection = true;
                                             info.State = ConnectionState.RUNNING;
                                             Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
 
@@ -682,7 +740,6 @@ namespace fnecore
                                         else
                                         {
                                             info.State = ConnectionState.WAITING_LOGIN;
-                                            info.Connection = false;
                                             Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master ACK contained wrong ID - connection reset");
                                         }
                                     }
@@ -692,7 +749,7 @@ namespace fnecore
                                 {
                                     if (this.peerId == peerId)
                                     {
-                                        info.Connection = false;
+                                        info.State = ConnectionState.WAITING_LOGIN;
                                         Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTCL received");
 
                                         // userland actions
@@ -740,6 +797,12 @@ namespace fnecore
                 catch (InvalidOperationException)
                 {
                     Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+
+                    // reset states
+                    PingsSent = 0;
+                    PingsAcked = 0;
+                    info.State = ConnectionState.WAITING_LOGIN;
+
                     client.Connect(masterEndpoint);
                 }
                 catch (SocketException se)
@@ -752,6 +815,12 @@ namespace fnecore
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+
+                            // reset states
+                            PingsSent = 0;
+                            PingsAcked = 0;
+                            info.State = ConnectionState.WAITING_LOGIN;
+
                             client.Connect(masterEndpoint);
                             break;
                         default:
@@ -776,8 +845,9 @@ namespace fnecore
                 try
                 {
                     // if we're not connected, zero out the connection stats and send a login request to the master
-                    if (!info.Connection || info.State == ConnectionState.WAITING_LOGIN)
+                    if (info.State == ConnectionState.WAITING_LOGIN)
                     {
+                        // reset states
                         PingsSent = 0;
                         PingsAcked = 0;
                         info.State = ConnectionState.WAITING_LOGIN;
@@ -792,12 +862,13 @@ namespace fnecore
                     }
 
                     // if we are connected, sent a ping to the master and increment the counter
-                    if (info.Connection && info.State == ConnectionState.RUNNING)
+                    if (info.State == ConnectionState.RUNNING)
                     {
                         if (PingsSent > (PingsAcked + MAX_MISSED_PEER_PINGS))
                         {
                             Log(LogLevel.WARNING, $"({systemName} Peer connection lost to {masterEndpoint}; reconnecting...");
 
+                            // reset states
                             PingsSent = 0;
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
@@ -818,6 +889,12 @@ namespace fnecore
                 catch (InvalidOperationException)
                 {
                     Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+
+                    // reset states
+                    PingsSent = 0;
+                    PingsAcked = 0;
+                    info.State = ConnectionState.WAITING_LOGIN;
+
                     client.Connect(masterEndpoint);
                 }
                 catch (SocketException se)
@@ -830,6 +907,12 @@ namespace fnecore
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+
+                            // reset states
+                            PingsSent = 0;
+                            PingsAcked = 0;
+                            info.State = ConnectionState.WAITING_LOGIN;
+
                             client.Connect(masterEndpoint);
                             break;
                         default:
