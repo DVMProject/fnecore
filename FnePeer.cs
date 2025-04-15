@@ -617,7 +617,7 @@ namespace fnecore
                                             PingsSent = 0;
                                             PingsAcked = 0;
                                             info.State = ConnectionState.WAITING_LOGIN;
-                                            return;
+                                            break;
                                         }
                                     }
                                 }
@@ -733,6 +733,8 @@ namespace fnecore
                                         {
                                             info.State = ConnectionState.RUNNING;
                                             Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
+
+                                            this.streamId = 0;
 
                                             // userland actions
                                             FirePeerConnected(new PeerConnectedEvent(peerId, info));
@@ -851,6 +853,8 @@ namespace fnecore
                         PingsSent = 0;
                         PingsAcked = 0;
                         info.State = ConnectionState.WAITING_LOGIN;
+
+                        this.streamId = CreateStreamID();
 
                         // send message to master
                         byte[] res = new byte[8];
