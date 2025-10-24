@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2023 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2025 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -18,6 +18,7 @@ using System.Security.Cryptography;
 using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
+using fnecore.Analog;
 using fnecore.EDAC;
 using fnecore.P25.KMM;
 
@@ -191,6 +192,80 @@ namespace fnecore
     } // public class PeerInformation
 
     /// <summary>
+    /// Represents a talkgroup as announced from the FNE master.
+    /// </summary>
+    public class TalkgroupEntry
+    {
+        /// <summary>
+        /// Talkgroup ID.
+        /// </summary>
+        public uint ID;
+        /// <summary>
+        /// Slot Number.
+        /// </summary>
+        public byte Slot;
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public bool Affiliated;
+        /// <summary>
+        /// 
+        /// </summary>
+        public bool NonPreferred;
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public bool Invalid;
+    } // public class TalkgroupEntry
+
+    /// <summary>
+    /// Represents high availiability IP address data.
+    /// </summary>
+    public class PeerHAIPEntry
+    {
+        /// <summary>
+        /// IP Address
+        /// </summary>
+        public string Address;
+        /// <summary>
+        /// Port Number
+        /// </summary>
+        public int Port;
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public IPEndPoint EndPoint;
+
+        /*
+        ** Methods
+        */
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PeerHAIPEntry"/> class.
+        /// </summary>
+        public PeerHAIPEntry()
+        {
+            Address = "127.0.0.1";
+            Port = 62031; // this should be a constant not a magic number -- but I digress
+            EndPoint = new IPEndPoint(IPAddress.Parse(Address), Port);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="PeerHAIPEntry"/> class.
+        /// </summary>
+        /// <param name="address">IP Address</param>
+        /// <param name="port">Port number</param>
+        public PeerHAIPEntry(string address, int port)
+        {
+            Address = address;
+            Port = port;
+            EndPoint = new IPEndPoint(IPAddress.Parse(Address), Port);
+        }
+    } // public class PeerHAIPEntry
+
+    /// <summary>
     /// Callback used to validate incoming DMR data.
     /// </summary>
     /// <param name="peerId">Peer ID</param>
@@ -296,6 +371,54 @@ namespace fnecore
             Buffer.BlockCopy(data, 0, Data, 0, data.Length);
         }
     } // public class DMRDataReceivedEvent : EventArgs
+    /// <summary>
+    /// Event used to process incoming DMR In-Call control data.
+    /// </summary>
+    public class DMRInCallControlEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID
+        /// </summary>
+        public uint PeerId { get; }
+        /// <summary>
+        /// Destination Address
+        /// </summary>
+        public uint DstId { get; }
+        /// <summary>
+        /// Slot Number
+        /// </summary>
+        public byte Slot { get; }
+        /// <summary>
+        /// In-Call Control Command
+        /// </summary>
+        public byte Command { get; }
+
+        /*
+        ** Methods
+        */
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DMRInCallControlEvent"/> class.
+        /// </summary>
+        private DMRInCallControlEvent()
+        {
+            /* stub */
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DMRInCallControlEvent"/> class.
+        /// </summary>
+        /// <param name="peerId">Peer ID</param>
+        /// <param name="dstId">Destination Address</param>
+        /// <param name="slot">Slot Number</param>
+        /// <param name="command">In-Call Command</param>
+        public DMRInCallControlEvent(uint peerId, uint dstId, byte slot, byte command) : base()
+        {
+            this.PeerId = peerId;
+            this.DstId = dstId;
+            this.Slot = slot;
+            this.Command = command;
+        }
+    } // public class DMRDataReceivedEvent : EventArgs
 
     /// <summary>
     /// Callback used to validate incoming P25 data.
@@ -390,6 +513,48 @@ namespace fnecore
             Buffer.BlockCopy(data, 0, Data, 0, data.Length);
         }
     } // public class P25DataReceivedEvent : EventArgs
+    /// <summary>
+    /// Event used to process incoming P25 In-Call control data.
+    /// </summary>
+    public class P25InCallControlEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID
+        /// </summary>
+        public uint PeerId { get; }
+        /// <summary>
+        /// Destination Address
+        /// </summary>
+        public uint DstId { get; }
+        /// <summary>
+        /// In-Call Control Command
+        /// </summary>
+        public byte Command { get; }
+
+        /*
+        ** Methods
+        */
+        /// <summary>
+        /// Initializes a new instance of the <see cref="P25InCallControlEvent"/> class.
+        /// </summary>
+        private P25InCallControlEvent()
+        {
+            /* stub */
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="P25InCallControlEvent"/> class.
+        /// </summary>
+        /// <param name="peerId">Peer ID</param>
+        /// <param name="dstId">Destination Address</param>
+        /// <param name="command">In-Call Command</param>
+        public P25InCallControlEvent(uint peerId, uint dstId, byte command) : base()
+        {
+            this.PeerId = peerId;
+            this.DstId = dstId;
+            this.Command = command;
+        }
+    } // public class P25InCallControlEvent : EventArgs
 
     /// <summary>
     /// Callback used to validate incoming NXDN data.
@@ -484,6 +649,184 @@ namespace fnecore
             Buffer.BlockCopy(data, 0, Data, 0, data.Length);
         }
     } // public class NXDNDataReceivedEvent : EventArgs
+    /// <summary>
+    /// Event used to process incoming NXDN In-Call control data.
+    /// </summary>
+    public class NXDNInCallControlEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID
+        /// </summary>
+        public uint PeerId { get; }
+        /// <summary>
+        /// Destination Address
+        /// </summary>
+        public uint DstId { get; }
+        /// <summary>
+        /// In-Call Control Command
+        /// </summary>
+        public byte Command { get; }
+
+        /*
+        ** Methods
+        */
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NXDNInCallControlEvent"/> class.
+        /// </summary>
+        private NXDNInCallControlEvent()
+        {
+            /* stub */
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NXDNInCallControlEvent"/> class.
+        /// </summary>
+        /// <param name="peerId">Peer ID</param>
+        /// <param name="dstId">Destination Address</param>
+        /// <param name="command">In-Call Command</param>
+        public NXDNInCallControlEvent(uint peerId, uint dstId, byte command) : base()
+        {
+            this.PeerId = peerId;
+            this.DstId = dstId;
+            this.Command = command;
+        }
+    } // public class NXDNInCallControlEvent : EventArgs
+
+    /// <summary>
+    /// Callback used to validate incoming analog data.
+    /// </summary>
+    /// <param name="peerId">Peer ID</param>
+    /// <param name="srcId">Source Address</param>
+    /// <param name="dstId">Destination Address</param>
+    /// <param name="callType">Call Type (Group or Private)</param>
+    /// <param name="audioFrameType">Analog Audio Frame Type</param>
+    /// <param name="frameType">Frame Type</param>
+    /// <param name="streamId">Stream ID</param>
+    /// <param name="message">Raw message data</param>
+    /// <returns>True, if data stream is valid, otherwise false.</returns>
+    public delegate bool AnalogDataValidate(uint peerId, uint srcId, uint dstId, CallType callType, AudioFrameType audioFrameType, FrameType frameType, uint streamId, byte[] message);
+    /// <summary>
+    /// Event used to process incoming analog data.
+    /// </summary>
+    public class AnalogDataReceivedEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID
+        /// </summary>
+        public uint PeerId { get; }
+        /// <summary>
+        /// Source Address
+        /// </summary>
+        public uint SrcId { get; }
+        /// <summary>
+        /// Destination Address
+        /// </summary>
+        public uint DstId { get; }
+        /// <summary>
+        /// Call Type (Group or Private)
+        /// </summary>
+        public CallType CallType { get; }
+        /// <summary>
+        /// Audio Frame Type
+        /// </summary>
+        public AudioFrameType AudioFrameType { get; }
+        /// <summary>
+        /// Frame Type
+        /// </summary>
+        public FrameType FrameType { get; }
+        /// <summary>
+        /// RTP Packet Sequence
+        /// </summary>
+        public ushort PacketSequence { get; }
+        /// <summary>
+        /// Stream ID
+        /// </summary>
+        public uint StreamId { get; }
+        /// <summary>
+        /// Raw message data
+        /// </summary>
+        public byte[] Data { get; }
+
+        /*
+        ** Methods
+        */
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AnalogDataReceivedEvent"/> class.
+        /// </summary>
+        private AnalogDataReceivedEvent()
+        {
+            /* stub */
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AnalogDataReceivedEvent"/> class.
+        /// </summary>
+        /// <param name="peerId">Peer ID</param>
+        /// <param name="srcId">Source Address</param>
+        /// <param name="dstId">Destination Address</param>
+        /// <param name="callType">Call Type (Group or Private)</param>
+        /// <param name="audioFrameType">Audio Message Type</param>
+        /// <param name="frameType">Frame Type</param>
+        /// <param name="pktSeq">RTP Packet Sequence</param>
+        /// <param name="streamId">Stream ID</param>
+        /// <param name="data">Raw message data</param>
+        public AnalogDataReceivedEvent(uint peerId, uint srcId, uint dstId, CallType callType, AudioFrameType audioFrameType, FrameType frameType, ushort pktSeq, uint streamId, byte[] data) : base()
+        {
+            this.PeerId = peerId;
+            this.SrcId = srcId;
+            this.DstId = dstId;
+            this.CallType = callType;
+            this.AudioFrameType = audioFrameType;
+            this.FrameType = frameType;
+            this.PacketSequence = pktSeq;
+            this.StreamId = streamId;
+
+            this.Data = new byte[data.Length];
+            Buffer.BlockCopy(data, 0, Data, 0, data.Length);
+        }
+    } // public class AnalogDataReceivedEvent : EventArgs
+    /// <summary>
+    /// Event used to process incoming analog In-Call control data.
+    /// </summary>
+    public class AnalogInCallControlEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID
+        /// </summary>
+        public uint PeerId { get; }
+        /// <summary>
+        /// Destination Address
+        /// </summary>
+        public uint DstId { get; }
+        /// <summary>
+        /// In-Call Control Command
+        /// </summary>
+        public byte Command { get; }
+
+        /*
+        ** Methods
+        */
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AnalogInCallControlEvent"/> class.
+        /// </summary>
+        private AnalogInCallControlEvent()
+        {
+            /* stub */
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AnalogInCallControlEvent"/> class.
+        /// </summary>
+        /// <param name="peerId">Peer ID</param>
+        /// <param name="dstId">Destination Address</param>
+        /// <param name="command">In-Call Command</param>
+        public AnalogInCallControlEvent(uint peerId, uint dstId, byte command) : base()
+        {
+            this.PeerId = peerId;
+            this.DstId = dstId;
+            this.Command = command;
+        }
+    } // public class AnalogInCallControlEvent : EventArgs
 
     /// <summary>
     /// Callback used to process whether or not a peer is being ignored for traffic.
@@ -629,6 +972,10 @@ namespace fnecore
         /// Event action that handles processing a DMR call stream.
         /// </summary>
         public event EventHandler<DMRDataReceivedEvent> DMRDataReceived;
+        /// <summary>
+        /// Event action that handles processing a DMR In-Call control request.
+        /// </summary>
+        public event EventHandler<DMRInCallControlEvent> DMRInCallControl;
 
         /// <summary>
         /// Callback action that handles validating a P25 call stream.
@@ -642,6 +989,10 @@ namespace fnecore
         /// Event action that handles processing a P25 call stream.
         /// </summary>
         public event EventHandler<P25DataReceivedEvent> P25DataReceived;
+        /// <summary>
+        /// Event action that handles processing a P25 In-Call control request.
+        /// </summary>
+        public event EventHandler<P25InCallControlEvent> P25InCallControl;
 
         /// <summary>
         /// Callback action that handles validating a NXDN call stream.
@@ -651,6 +1002,23 @@ namespace fnecore
         /// Event action that handles processing a NXDN call stream.
         /// </summary>
         public event EventHandler<NXDNDataReceivedEvent> NXDNDataReceived;
+        /// <summary>
+        /// Event action that handles processing a NXDN In-Call control request.
+        /// </summary>
+        public event EventHandler<NXDNInCallControlEvent> NXDNInCallControl;
+
+        /// <summary>
+        /// Callback action that handles validating a analog call stream.
+        /// </summary>
+        public AnalogDataValidate AnalogDataValidate = null;
+        /// <summary>
+        /// Event action that handles processing a analog call stream.
+        /// </summary>
+        public event EventHandler<AnalogDataReceivedEvent> AnalogDataReceived;
+        /// <summary>
+        /// Event action that handles processing a analog In-Call control request.
+        /// </summary>
+        public event EventHandler<AnalogInCallControlEvent> AnalogInCallControl;
 
         /// <summary>
         /// Callback action that handles verifying if a peer is ignored for a call stream.
@@ -878,6 +1246,16 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to fire the DMR In-Call control event.
+        /// </summary>
+        /// <param name="e"><see cref=""/> instance</param>
+        protected void FireDMRInCallControl(DMRInCallControlEvent e)
+        {
+            if (DMRInCallControl != null)
+                DMRInCallControl.Invoke(this, e);
+        }
+
+        /// <summary>
         /// Helper to fire the P25 data pre-process event.
         /// </summary>
         /// <param name="e"><see cref="P25DataReceivedEvent"/> instance</param>
@@ -898,6 +1276,16 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to fire the P25 In-Call control event.
+        /// </summary>
+        /// <param name="e"><see cref=""/> instance</param>
+        protected void FireP25InCallControl(P25InCallControlEvent e)
+        {
+            if (P25InCallControl != null)
+                P25InCallControl.Invoke(this, e);
+        }
+
+        /// <summary>
         /// Helper to fire the NXDN data received event.
         /// </summary>
         /// <param name="e"><see cref="NXDNDataReceivedEvent"/> instance</param>
@@ -905,6 +1293,36 @@ namespace fnecore
         {
             if (NXDNDataReceived != null)
                 NXDNDataReceived.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the NXDN In-Call control event.
+        /// </summary>
+        /// <param name="e"><see cref=""/> instance</param>
+        protected void FireNXDNInCallControl(NXDNInCallControlEvent e)
+        {
+            if (NXDNInCallControl != null)
+                NXDNInCallControl.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the analog data received event.
+        /// </summary>
+        /// <param name="e"><see cref="AnalogDataReceivedEvent"/> instance</param>
+        protected void FireAnalogDataReceived(AnalogDataReceivedEvent e)
+        {
+            if (AnalogDataReceived != null)
+                AnalogDataReceived.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the analog In-Call control event.
+        /// </summary>
+        /// <param name="e"><see cref=""/> instance</param>
+        protected void FireAnalogInCallControl(AnalogInCallControlEvent e)
+        {
+            if (AnalogInCallControl != null)
+                AnalogInCallControl.Invoke(this, e);
         }
 
         /// <summary>

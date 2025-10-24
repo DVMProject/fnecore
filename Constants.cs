@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022,2025 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -196,6 +196,19 @@ namespace fnecore
         public const byte DVMRtpPayloadType = 0x56;
         public const byte DVMFrameStart = 0xFE;
 
+        public const uint DMRPacketLength = 55U;            // 20 byte header + DMR_FRAME_LENGTH_BYTES + 2 byte trailer
+        public const uint P25LDU1PacketLength = 193U;       // 24 byte header + DFSI data + 1 byte frame type + 12 byte enc sync
+        public const uint P25LDU2PacketLength = 181U;       // 24 byte header + DFSI data + 1 byte frame type
+        public const uint P25TSDUPacketLength = 69U;        // 24 byte header + TSDU data
+        public const uint P25TDULCPacketLength = 78U;       // 24 byte header + TDULC data
+        public const uint NXDNPacketLength = 70U;           // 20 byte header + NXDN_FRAME_LENGTH_BYTES + 2 byte trailer
+        public const uint AnalogPacketLength = 324U;        // 20 byte header + AUDIO_SAMPLES_LENGTH_BYTES + 4 byte trailer
+
+        public const uint HAParamsEntryLen = 20;
+
+        public const int MAX_RETRY_BEFORE_RECONNECT = 4;
+        public const int MAX_RETRY_HA_RECONNECT = 2;
+
         /*
         ** Protocol Functions and Sub-Functions
         */
@@ -205,12 +218,14 @@ namespace fnecore
         public const byte NET_PROTOCOL_SUBFUNC_DMR = 0x00;                      // DMR
         public const byte NET_PROTOCOL_SUBFUNC_P25 = 0x01;                      // P25
         public const byte NET_PROTOCOL_SUBFUNC_NXDN = 0x02;                     // NXDN
+        public const byte NET_PROTOCOL_SUBFUNC_ANALOG = 0x03;                   // Analog
 
         public const byte NET_FUNC_MASTER = 0x01;                               // Network Master Function
         public const byte NET_MASTER_SUBFUNC_WL_RID = 0x00;                     // Whitelist RIDs
         public const byte NET_MASTER_SUBFUNC_BL_RID = 0x01;                     // Blacklist RIDs
         public const byte NET_MASTER_SUBFUNC_ACTIVE_TGS = 0x02;                 // Active TGIDs
         public const byte NET_MASTER_SUBFUNC_DEACTIVE_TGS = 0x03;               // Deactive TGIDs
+        public const byte NET_MASTER_SUBFUNC_HA_PARAMS = 0xA3;                  // HA Parameters
 
         public const byte NET_FUNC_RPTL = 0x60;                                 // Repeater Login
         public const byte NET_FUNC_RPTK = 0x61;                                 // Repeater Authorisation
@@ -223,6 +238,7 @@ namespace fnecore
         public const byte NET_FUNC_PONG = 0x75;                                 // Pong
 
         public const byte NET_FUNC_GRANT = 0x7A;                                // Grant Request
+        public const byte NET_FUNC_INCALL_CTRL = 0x7B;                          // In-CAll Control
         public const byte NET_FUNC_KEY_REQ = 0x7C;                              // Encryption Key Request
         public const byte NET_FUNC_KEY_RSP = 0x7D;                              // Encryption Key Response
 
@@ -239,6 +255,9 @@ namespace fnecore
         public const byte NET_ANNC_SUBFUNC_UNIT_DEREG = 0x02;                   // Announce Unit Deregistration
         public const byte NET_ANNC_SUBFUNC_GRP_UNAFFIL = 0x03;                  // Announce Group Affiliation Removal
         public const byte NET_ANNC_SUBFUNC_AFFILS = 0x90;                       // Update All Affiliations
+
+        public const byte NET_ICC_BUSY_DENY = 0x00;                             // In-Call Busy Deny
+        public const byte NET_ICC_REJECT_TRAFFIC = 0x01;                        // In-Call Reject Active Traffic
 
         /*
         ** Protocol Tags (as strings)
