@@ -1,6 +1,6 @@
 # Digital Voice Modem Fixed Network Equipment
 
-This is a library project that implements the basic communications layer for implementing DVM FNE clients (peers) and servers (masters).
+This is a library project that implements the basic communications layer for implementing DVM FNE clients (peers).
 
 ## License
 

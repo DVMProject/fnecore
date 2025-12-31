@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2023 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2025 Bryan Biedenkapp, N2PLL
 *   Copyright (C) 2024 Caleb, KO4UYJ
 *
 */
@@ -26,8 +26,8 @@ using System.Collections.Generic;
 using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
+using fnecore.Analog;
 using fnecore.P25.KMM;
-using System.Net.NetworkInformation;
 
 namespace fnecore
 {
@@ -62,6 +62,13 @@ namespace fnecore
         private ushort currPktSeq = 0;
         private uint streamId = 0;
 
+        private List<TalkgroupEntry> announcedTGs = new List<TalkgroupEntry>();
+        private List<PeerHAIPEntry> haIPs = new List<PeerHAIPEntry>();
+        private int currentHAIP;
+
+        private int retryCount;
+        private int maxRetryCount = Constants.MAX_RETRY_BEFORE_RECONNECT;
+
         /*
         ** Properties
         */
@@ -83,6 +90,11 @@ namespace fnecore
             get;
             set;
         }
+
+        /// <summary>
+        /// Gets the list of talkgroups announced from the master FNE.
+        /// </summary>
+        public List<TalkgroupEntry> AnnouncedTGs => announcedTGs;
 
         /// <summary>
         /// Gets the number of pings sent.
@@ -403,6 +415,30 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to rotate the master endpoint to the next HA endpoint.
+        /// </summary>
+        private void RotateMasterEndpont()
+        {
+            // are we rotating IPs for HA reconnect?
+            if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
+            {
+
+                PeerHAIPEntry entry = haIPs[currentHAIP];
+                currentHAIP++;
+
+                if (currentHAIP > haIPs.Count)
+                {
+                    currentHAIP = 0;
+                }
+
+                Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
+                masterEndpoint = entry.EndPoint;
+            }
+
+            ++retryCount;
+        }
+
+        /// <summary>
         /// Internal UDP listen routine.
         /// </summary>
         private async void Listen()
@@ -461,7 +497,7 @@ namespace fnecore
                         {
                             case Constants.NET_FUNC_PROTOCOL:
                                 {
-                                    if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_DMR)        // Encapsulated DMR data frame
+                                    if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_DMR)            // Encapsulated DMR data frame
                                     {
                                         if (peerId != this.peerId)
                                         {
@@ -472,6 +508,8 @@ namespace fnecore
                                         // is this for our peer?
                                         if (peerId == this.peerId)
                                         {
+                                            // TODO: port the mux validation logic from dvmhost:src/common/network/Network.cpp
+
                                             byte seqNo = message[4];
                                             uint srcId = FneUtils.Bytes3ToUInt32(message, 5);
                                             uint dstId = FneUtils.Bytes3ToUInt32(message, 8);
@@ -493,7 +531,7 @@ namespace fnecore
                                             FireDMRDataReceived(new DMRDataReceivedEvent(peerId, srcId, dstId, slot, callType, frameType, dataType, n, rtpHeader.Sequence, streamId, message));
                                         }
                                     }
-                                    else if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_P25)   // Encapsulated P25 data frame
+                                    else if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_P25)       // Encapsulated P25 data frame
                                     {
                                         if (peerId != this.peerId)
                                         {
@@ -504,6 +542,8 @@ namespace fnecore
                                         // is this for our peer?
                                         if (peerId == this.peerId)
                                         {
+                                            // TODO: port the mux validation logic from dvmhost:src/common/network/Network.cpp
+
                                             uint srcId = FneUtils.Bytes3ToUInt32(message, 5);
                                             uint dstId = FneUtils.Bytes3ToUInt32(message, 8);
                                             CallType callType = (message[4] == P25Defines.LC_PRIVATE) ? CallType.PRIVATE : CallType.GROUP;
@@ -516,7 +556,7 @@ namespace fnecore
                                             FireP25DataReceived(new P25DataReceivedEvent(peerId, srcId, dstId, callType, duid, frameType, rtpHeader.Sequence, streamId, message));
                                         }
                                     }
-                                    else if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_NXDN)  // Encapsulated NXDN data frame
+                                    else if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_NXDN)      // Encapsulated NXDN data frame
                                     {
                                         if (peerId != this.peerId)
                                         {
@@ -527,6 +567,8 @@ namespace fnecore
                                         // is this for our peer?
                                         if (peerId == this.peerId)
                                         {
+                                            // TODO: port the mux validation logic from dvmhost:src/common/network/Network.cpp
+
                                             NXDNMessageType messageType = (NXDNMessageType)message[4];
                                             uint srcId = FneUtils.Bytes3ToUInt32(message, 5);
                                             uint dstId = FneUtils.Bytes3ToUInt32(message, 8);
@@ -541,6 +583,31 @@ namespace fnecore
                                             FireNXDNDataReceived(new NXDNDataReceivedEvent(peerId, srcId, dstId, callType, messageType, frameType, rtpHeader.Sequence, streamId, message));
                                         }
                                     }
+                                    else if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_ANALOG)    // Encapsulated Analog data frame
+                                    {
+                                        if (peerId != this.peerId)
+                                        {
+                                            //Log(LogLevel.WARNING, $"({systemName}) PEER {peerId}; routed traffic, rewriting PEER {this.peerId}");
+                                            peerId = this.peerId;
+                                        }
+
+                                        // is this for our peer?
+                                        if (peerId == this.peerId)
+                                        {
+                                            // TODO: port the mux validation logic from dvmhost:src/common/network/Network.cpp
+
+                                            uint srcId = FneUtils.Bytes3ToUInt32(message, 5);
+                                            uint dstId = FneUtils.Bytes3ToUInt32(message, 8);
+                                            CallType callType = CallType.GROUP; /* analog calls cannot be private calls right now ... */
+                                            AudioFrameType audioFrameType = (AudioFrameType)(message[15] & 0x0F);
+                                            FrameType frameType = (audioFrameType != AudioFrameType.TERMINATOR) ? FrameType.VOICE : FrameType.TERMINATOR;
+#if DEBUG
+                                            Log(LogLevel.DEBUG, $"{systemName} P25D: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
+#endif
+                                            // perform any userland actions with the data
+                                            FireAnalogDataReceived(new AnalogDataReceivedEvent(peerId, srcId, dstId, callType, audioFrameType, frameType, rtpHeader.Sequence, streamId, message));
+                                        }
+                                    }
                                     else
                                     {
                                         Log(LogLevel.ERROR, $"({systemName}) Unknown protocol opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
@@ -548,9 +615,166 @@ namespace fnecore
                                 }
                                 break;
 
-                            case Constants.NET_FUNC_MASTER:
+                            case Constants.NET_FUNC_MASTER:                                                 // Master
                                 {
-                                    /* stub */
+                                    if (this.peerId == peerId)
+                                    {
+                                        // process incoming message subfunction opcodes
+                                        switch (fneHeader.SubFunction)
+                                        {
+                                            case Constants.NET_MASTER_SUBFUNC_ACTIVE_TGS:                   // Talkgroup Active IDs
+                                                {
+                                                    uint len = FneUtils.ToUInt32(message, 6);
+                                                    int offs = 11;
+                                                    for (int i = 0; i < len; i++)
+                                                    {
+                                                        uint id = FneUtils.Bytes3ToUInt32(message, offs);
+                                                        byte slot = (byte)(message[offs + 3] & 0x03);
+                                                        bool affiliated = (message[offs + 3] & 0x40) == 0x40;
+                                                        bool nonPreferred = (message[offs + 3] & 0x80) == 0x80;
+
+                                                        TalkgroupEntry entry = new TalkgroupEntry()
+                                                        {
+                                                            ID = id,
+                                                            Slot = slot,
+                                                            Affiliated = affiliated,
+                                                            NonPreferred = nonPreferred,
+                                                            Invalid = false
+                                                        };
+
+                                                        int idx = announcedTGs.FindIndex(x => x.ID == id && x.Slot == slot);
+                                                        if (idx != -1)
+                                                            announcedTGs[idx] = entry;
+                                                        else
+                                                            announcedTGs.Add(entry);
+
+                                                        offs += 5;
+                                                    }
+
+                                                    Log(LogLevel.INFO, $"Activated {len} TGs; loaded {announcedTGs.Count} entries into talkgroup table");
+                                                }
+                                                break;
+                                            case Constants.NET_MASTER_SUBFUNC_DEACTIVE_TGS:                 // Talkgroup Deactivated IDs
+                                                {
+                                                    uint len = FneUtils.ToUInt32(message, 6);
+                                                    int offs = 11;
+                                                    for (int i = 0; i < len; i++)
+                                                    {
+                                                        uint id = FneUtils.Bytes3ToUInt32(message, offs);
+                                                        byte slot = message[offs + 3];
+
+                                                        int idx = announcedTGs.FindIndex(x => x.ID == id && x.Slot == slot);
+                                                        if (idx != -1)
+                                                            announcedTGs[idx].Invalid = true;
+                                                        else
+                                                        {
+                                                            TalkgroupEntry entry = new TalkgroupEntry()
+                                                            {
+                                                                ID = id,
+                                                                Slot = slot,
+                                                                Affiliated = false,
+                                                                NonPreferred = false,
+                                                                Invalid = true
+                                                            };
+                                                            announcedTGs.Add(entry);
+                                                        }
+
+                                                        offs += 5;
+                                                    }
+
+                                                    Log(LogLevel.INFO, $"Deactivated {len} TGs; loaded {announcedTGs.Count} entries into talkgroup table");
+                                                }
+                                                break;
+
+                                            case Constants.NET_MASTER_SUBFUNC_HA_PARAMS:                    // HA Parameters
+                                                {
+                                                    haIPs.Clear();
+                                                    currentHAIP = 0;
+                                                    maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
+
+                                                    // always add the configured address to the HA IP list
+                                                    haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
+
+                                                    uint len = FneUtils.ToUInt32(message, 6);
+                                                    if (len > 0)
+                                                        len /= Constants.HAParamsEntryLen;
+
+                                                    int offs = 10;
+                                                    for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                    {
+                                                        uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
+                                                        ushort port = FneUtils.ToUInt16(message, offs + 8);
+
+                                                        IPAddress address = new IPAddress(ipAddr);
+                                                        haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
+                                                    }
+
+                                                    if (haIPs.Count > 1)
+                                                    {
+                                                        currentHAIP = 1;
+                                                        Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                    }
+                                                }
+                                                break;
+
+                                            default:
+                                                Log(LogLevel.ERROR, $"({systemName}) Unknown protocol opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                                                break;
+                                        }
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_INCALL_CTRL:                                            // In-Call Control
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        // process incoming message subfunction opcodes
+                                        switch (fneHeader.SubFunction)
+                                        {
+                                            case Constants.NET_PROTOCOL_SUBFUNC_DMR:                        // DMR In-Call Control
+                                                {
+                                                    byte command = message[10];
+                                                    uint dstId = FneUtils.Bytes3ToUInt32(message, 11);
+                                                    byte slot = message[14];
+
+                                                    // fire off DMR in-call callback if we have one
+                                                    FireDMRInCallControl(new DMRInCallControlEvent(peerId, dstId, slot, command));
+                                                }
+                                                break;
+                                            case Constants.NET_PROTOCOL_SUBFUNC_P25:                        // P25 In-Call Control
+                                                {
+                                                    byte command = message[10];
+                                                    uint dstId = FneUtils.Bytes3ToUInt32(message, 11);
+
+                                                    // fire off P25 in-call callback if we have one
+                                                    FireP25InCallControl(new P25InCallControlEvent(peerId, dstId, command));
+                                                }
+                                                break;
+                                            case Constants.NET_PROTOCOL_SUBFUNC_NXDN:                       // NXDN In-Call Control
+                                                {
+                                                    byte command = message[10];
+                                                    uint dstId = FneUtils.Bytes3ToUInt32(message, 11);
+
+                                                    // fire off NXDN in-call callback if we have one
+                                                    FireNXDNInCallControl(new NXDNInCallControlEvent(peerId, dstId, command));
+                                                }
+                                                break;
+                                            case Constants.NET_PROTOCOL_SUBFUNC_ANALOG:                     // Analog In-Call Control
+                                                {
+                                                    byte command = message[10];
+                                                    uint dstId = FneUtils.Bytes3ToUInt32(message, 11);
+
+                                                    // fire off analog in-call callback if we have one
+                                                    FireAnalogInCallControl(new AnalogInCallControlEvent(peerId, dstId, command));
+                                                }
+                                                break;
+
+                                            default:
+                                                Log(LogLevel.ERROR, $"({systemName}) Unknown incall control opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                                                break;
+                                        }
+                                    }
                                 }
                                 break;
 
@@ -735,6 +959,7 @@ namespace fnecore
                                             Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
 
                                             this.streamId = 0;
+                                            retryCount = 0; // reset retry count
 
                                             // userland actions
                                             FirePeerConnected(new PeerConnectedEvent(peerId, info));
@@ -799,6 +1024,7 @@ namespace fnecore
                 catch (InvalidOperationException)
                 {
                     Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+                    RotateMasterEndpont();
 
                     // reset states
                     PingsSent = 0;
@@ -817,6 +1043,7 @@ namespace fnecore
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+                            RotateMasterEndpont();
 
                             // reset states
                             PingsSent = 0;
@@ -871,6 +1098,7 @@ namespace fnecore
                         if (PingsSent > (PingsAcked + MAX_MISSED_PEER_PINGS))
                         {
                             Log(LogLevel.WARNING, $"({systemName} Peer connection lost to {masterEndpoint}; reconnecting...");
+                            RotateMasterEndpont();
 
                             // reset states
                             PingsSent = 0;
@@ -893,6 +1121,7 @@ namespace fnecore
                 catch (InvalidOperationException)
                 {
                     Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+                    RotateMasterEndpont();
 
                     // reset states
                     PingsSent = 0;
@@ -911,6 +1140,7 @@ namespace fnecore
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+                            RotateMasterEndpont();
 
                             // reset states
                             PingsSent = 0;
