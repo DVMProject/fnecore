@@ -39,6 +39,18 @@ namespace fnecore
     /// <param name="streamId">Stream ID</param>
     /// <returns>True, if the frame was handled, otherwise false.</returns>
     public delegate bool RawNetworkFrame(UdpFrame frame, uint peerId, uint streamId);
+    /// <summary>
+    /// Callback used to process a raw network frame.
+    /// </summary>
+    /// <param name="frame"><see cref="UdpFrame"/></param>
+    /// <param name="peerId">Peer ID</param>
+    /// <param name="streamId">Stream ID</param>
+    /// <param name="rtpHeader">RTP Header</param>
+    /// <param name="fneHeader">RTP FNE Header</param>
+    /// <param name="message">Raw packet message</param>
+    /// <returns>True, if the frame was handled, otherwise false.</returns>
+    public delegate bool UserPacketHandler(UdpFrame frame, uint peerId, uint streamId,
+        RtpHeader rtpHeader, RtpFNEHeader fneHeader, byte[] message);
 
     /// <summary>
     /// Implements an FNE "peer".
@@ -114,6 +126,16 @@ namespace fnecore
             private set;
         }
 
+        /// <summary>
+        /// Gets/sets flag indicating whether or not the user packet handler is also handling
+        /// protocol packets.
+        /// </summary>
+        public bool UserProtocolHandler
+        {
+            get;
+            set;
+        }
+
         /*
         ** Events/Callbacks
         */
@@ -122,6 +144,10 @@ namespace fnecore
         /// Event action that handles a raw network frame directly.
         /// </summary>
         public RawNetworkFrame NetworkFrameHandler = null;
+        /// <summary>
+        /// Event action that handles a RTP network packet.
+        /// </summary>
+        public UserPacketHandler UserPacketHandler = null;
 
         /*
         ** Methods
@@ -156,6 +182,8 @@ namespace fnecore
             info = new PeerInformation();
             info.PeerID = peerId;
             info.State = ConnectionState.WAITING_LOGIN;
+
+            UserProtocolHandler = false;
 
             PingsAcked = 0;
         }
@@ -497,6 +525,13 @@ namespace fnecore
                         {
                             case Constants.NET_FUNC_PROTOCOL:
                                 {
+                                    // are we handling protocol packets with the user packet handler?
+                                    if (UserPacketHandler != null && UserProtocolHandler)
+                                    {
+                                        UserPacketHandler(frame, peerId, streamId, rtpHeader, fneHeader, message);
+                                        break;
+                                    }
+
                                     if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_DMR)            // Encapsulated DMR data frame
                                     {
                                         if (peerId != this.peerId)
@@ -1016,6 +1051,13 @@ namespace fnecore
                                 break;
 
                             default:
+                                // are we handling anything else with a user handler?
+                                if (UserPacketHandler != null)
+                                {
+                                    UserPacketHandler(frame, peerId, streamId, rtpHeader, fneHeader, message);
+                                    break;
+                                }
+
                                 Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
                                 break;
                         }
