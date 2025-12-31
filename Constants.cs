@@ -248,6 +248,7 @@ namespace fnecore
         public const byte NET_FUNC_TRANSFER = 0x90;                             // Network Transfer Function
         public const byte NET_TRANSFER_SUBFUNC_ACTIVITY = 0x01;                 // Activity Log Transfer
         public const byte NET_TRANSFER_SUBFUNC_DIAG = 0x02;                     // Diagnostic Log Transfer
+        public const byte NET_TRANSFER_SUBFUNC_STATUS = 0x03;                   // Status Transfer
 
         public const byte NET_FUNC_ANNOUNCE = 0x91;                             // Network Announce Function
         public const byte NET_ANNC_SUBFUNC_GRP_AFFIL = 0x00;                    // Announce Group Affiliation

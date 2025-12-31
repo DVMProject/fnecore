@@ -50,6 +50,10 @@ namespace fnecore
         /// Conventional Peer
         /// </summary>
         public bool ConventionalPeer;
+        /// <summary>
+        /// System View
+        /// </summary>
+        public bool SysView;
 
         /// <summary>
         /// Software Identifier

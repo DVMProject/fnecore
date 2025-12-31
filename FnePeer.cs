@@ -924,6 +924,7 @@ namespace fnecore
                                                     // peer types
                                                     jsonWriter.WriteBoolean("externalPeer", info.Details.ExternalPeer);
                                                     jsonWriter.WriteBoolean("conventionalPeer", info.Details.ConventionalPeer);
+                                                    jsonWriter.WriteBoolean("sysView", info.Details.SysView);
 
                                                     // system info
                                                     {
