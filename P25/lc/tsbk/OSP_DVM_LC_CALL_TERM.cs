@@ -33,6 +33,7 @@ namespace fnecore.P25.LC.TSBK
             DstId = dstId;
             SrcId = srcId;
             Lco = P25Defines.LC_CALL_TERM;
+            MfId = P25Defines.P25_MFG_DVM_OCS;
         }
 
         /// <summary>
