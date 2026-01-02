@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2024-2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2024-2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -22,6 +22,7 @@ using fnecore.EDAC;
 using fnecore.DMR;
 using fnecore.P25;
 using fnecore.NXDN;
+using fnecore.P25.LC.TSBK;
 
 namespace fnecore
 {
@@ -524,6 +525,30 @@ namespace fnecore
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
             peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
+        }
+
+        /// <summary>
+        /// Helper to send a DVM call termination TSDU.
+        /// </summary>
+        /// <param name="srcId"></param>
+        /// <param name="dstId"></param>
+        public void SendDVMCallTermination(uint srcId, uint dstId)
+        {
+            OSP_DVM_LC_CALL_TERM osp = new OSP_DVM_LC_CALL_TERM(dstId, srcId);
+
+            RemoteCallData callData = new RemoteCallData
+            {
+                MFId = P25Defines.P25_MFG_DVM_OCS,
+                SrcId = srcId,
+                DstId = dstId,
+                LCO = P25Defines.LC_CALL_TERM
+            };
+
+            byte[] tsbk = new byte[P25Defines.P25_TSBK_LENGTH_BYTES];
+
+            osp.Encode(ref tsbk);
+
+            SendP25TSBK(callData, tsbk);
         }
 
         /// <summary>

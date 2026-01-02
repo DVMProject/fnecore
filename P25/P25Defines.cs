@@ -154,6 +154,7 @@ namespace fnecore.P25
         public const byte P25_FT_DATA_UNIT = 0x00;
 
         public const byte P25_MFG_STANDARD = 0x00;
+        public const byte P25_MFG_DVM_OCS = 0x9C;
 
         public const byte P25_ALGO_UNENCRYPT = 0x80;
         public const byte P25_ALGO_DES = 0x81;
