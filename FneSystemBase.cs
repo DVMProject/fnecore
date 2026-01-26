@@ -528,30 +528,6 @@ namespace fnecore
         }
 
         /// <summary>
-        /// Helper to send a DVM call termination TSDU.
-        /// </summary>
-        /// <param name="srcId"></param>
-        /// <param name="dstId"></param>
-        public void SendDVMCallTermination(uint srcId, uint dstId)
-        {
-            OSP_DVM_LC_CALL_TERM osp = new OSP_DVM_LC_CALL_TERM(dstId, srcId);
-
-            RemoteCallData callData = new RemoteCallData
-            {
-                MFId = P25Defines.P25_MFG_DVM_OCS,
-                SrcId = srcId,
-                DstId = dstId,
-                LCO = P25Defines.LC_CALL_TERM
-            };
-
-            byte[] tsbk = new byte[P25Defines.P25_TSBK_LENGTH_BYTES];
-
-            osp.Encode(ref tsbk);
-
-            SendP25TSBK(callData, tsbk);
-        }
-
-        /// <summary>
         /// Helper to send a P25 TDU message.
         /// </summary>
         /// <param name="callData"></param>
