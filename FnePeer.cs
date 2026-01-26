@@ -645,7 +645,7 @@ namespace fnecore
                                     }
                                     else
                                     {
-                                        Log(LogLevel.ERROR, $"({systemName}) Unknown protocol opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                                        Log(LogLevel.ERROR, $"({systemName}) Unknown protocol opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
                                     }
                                 }
                                 break;
