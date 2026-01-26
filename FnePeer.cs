@@ -657,6 +657,11 @@ namespace fnecore
                                         // process incoming message subfunction opcodes
                                         switch (fneHeader.SubFunction)
                                         {
+                                            case Constants.NET_MASTER_SUBFUNC_WL_RID:                       // Whitelisted Radio IDs
+                                            case Constants.NET_MASTER_SUBFUNC_BL_RID:                       // Blacklisted Radio IDs
+                                                // ignore these
+                                                break;
+
                                             case Constants.NET_MASTER_SUBFUNC_ACTIVE_TGS:                   // Talkgroup Active IDs
                                                 {
                                                     uint len = FneUtils.ToUInt32(message, 6);
