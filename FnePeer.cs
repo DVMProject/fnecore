@@ -1059,7 +1059,7 @@ namespace fnecore
                                     break;
                                 }
 
-                                Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                                Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {fneHeader.Function} / {fneHeader.SubFunction} -- {FneUtils.HexDump(message, 0)}");
                                 break;
                         }
                     }
