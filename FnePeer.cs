@@ -753,7 +753,7 @@ namespace fnecore
                                                 break;
 
                                             default:
-                                                Log(LogLevel.ERROR, $"({systemName}) Unknown protocol opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                                                Log(LogLevel.ERROR, $"({systemName}) Unknown master opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
                                                 break;
                                         }
                                     }
@@ -806,7 +806,7 @@ namespace fnecore
                                                 break;
 
                                             default:
-                                                Log(LogLevel.ERROR, $"({systemName}) Unknown incall control opcode {FneUtils.BytesToString(message, 0, 4)} -- {FneUtils.HexDump(message, 0)}");
+                                                Log(LogLevel.ERROR, $"({systemName}) Unknown incall control opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
                                                 break;
                                         }
                                     }
