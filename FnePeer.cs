@@ -81,6 +81,8 @@ namespace fnecore
         private int retryCount;
         private int maxRetryCount = Constants.MAX_RETRY_BEFORE_RECONNECT;
 
+        private bool trafficLogging;
+
         /*
         ** Properties
         */
@@ -160,8 +162,9 @@ namespace fnecore
         /// <param name="peerId"></param>
         /// <param name="address"></param>
         /// <param name="port"></param>
-        public FnePeer(string systemName, uint peerId, string address, int port, string PresharedKey = null) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), PresharedKey)
+        public FnePeer(string systemName, uint peerId, string address, int port, string PresharedKey = null, bool trafficLogging = false) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), PresharedKey)
         {
+            this.trafficLogging = trafficLogging;
             /* stub */
         }
 
@@ -171,7 +174,7 @@ namespace fnecore
         /// <param name="systemName"></param>
         /// <param name="peerId"></param>
         /// <param name="endpoint"></param>
-        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string PresharedKey = null) : base(systemName, peerId)
+        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string PresharedKey = null, bool trafficLogging = false) : base(systemName, peerId)
         {
             masterEndpoint = endpoint;
             client = new UdpReceiver();
@@ -186,6 +189,8 @@ namespace fnecore
             UserProtocolHandler = false;
 
             PingsAcked = 0;
+
+            this.trafficLogging = trafficLogging;
         }
 
         /// <summary>
@@ -560,7 +565,8 @@ namespace fnecore
 
                                             byte n = (byte)(bits & 0xF);
 #if DEBUG
-                                            Log(LogLevel.DEBUG, $"{systemName} DMRD: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} TS {slot} [STREAM ID {streamId}]");
+                                            if (trafficLogging)
+                                                Log(LogLevel.DEBUG, $"{systemName} DMRD: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} TS {slot} [STREAM ID {streamId}]");
 #endif
                                             // perform any userland actions with the data
                                             FireDMRDataReceived(new DMRDataReceivedEvent(peerId, srcId, dstId, slot, callType, frameType, dataType, n, rtpHeader.Sequence, streamId, message));
@@ -585,7 +591,8 @@ namespace fnecore
                                             P25DUID duid = (P25DUID)message[22];
                                             FrameType frameType = ((duid != P25DUID.TDU) && (duid != P25DUID.TDULC)) ? FrameType.VOICE : FrameType.TERMINATOR;
 #if DEBUG
-                                            Log(LogLevel.DEBUG, $"{systemName} P25D: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
+                                            if (trafficLogging)
+                                                Log(LogLevel.DEBUG, $"{systemName} P25D: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
 #endif
                                             // perform any userland actions with the data
                                             FireP25DataReceived(new P25DataReceivedEvent(peerId, srcId, dstId, callType, duid, frameType, rtpHeader.Sequence, streamId, message));
@@ -612,7 +619,8 @@ namespace fnecore
                                             CallType callType = ((bits & 0x40) == 0x40) ? CallType.PRIVATE : CallType.GROUP;
                                             FrameType frameType = (messageType != NXDNMessageType.MESSAGE_TYPE_TX_REL) ? FrameType.VOICE : FrameType.TERMINATOR;
 #if DEBUG
-                                            Log(LogLevel.DEBUG, $"{systemName} NXDD: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
+                                            if (trafficLogging)
+                                                Log(LogLevel.DEBUG, $"{systemName} NXDD: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
 #endif
                                             // perform any userland actions with the data
                                             FireNXDNDataReceived(new NXDNDataReceivedEvent(peerId, srcId, dstId, callType, messageType, frameType, rtpHeader.Sequence, streamId, message));
@@ -637,7 +645,8 @@ namespace fnecore
                                             AudioFrameType audioFrameType = (AudioFrameType)(message[15] & 0x0F);
                                             FrameType frameType = (audioFrameType != AudioFrameType.TERMINATOR) ? FrameType.VOICE : FrameType.TERMINATOR;
 #if DEBUG
-                                            Log(LogLevel.DEBUG, $"{systemName} P25D: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
+                                            if (trafficLogging)
+                                                Log(LogLevel.DEBUG, $"{systemName} P25D: SRC_PEER {peerId} SRC_ID {srcId} DST_ID {dstId} [STREAM ID {streamId}]");
 #endif
                                             // perform any userland actions with the data
                                             FireAnalogDataReceived(new AnalogDataReceivedEvent(peerId, srcId, dstId, callType, audioFrameType, frameType, rtpHeader.Sequence, streamId, message));
