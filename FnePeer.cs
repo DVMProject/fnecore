@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2026 Bryan Biedenkapp, N2PLL
 *   Copyright (C) 2024 Caleb, KO4UYJ
 *
 */
@@ -162,7 +162,9 @@ namespace fnecore
         /// <param name="peerId"></param>
         /// <param name="address"></param>
         /// <param name="port"></param>
-        public FnePeer(string systemName, uint peerId, string address, int port, string PresharedKey = null, bool trafficLogging = false) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), PresharedKey)
+        /// <param name="presharedKey"></param>
+        /// <param name="trafficLogging"></param>
+        public FnePeer(string systemName, uint peerId, string address, int port, string presharedKey = null, bool trafficLogging = false) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), presharedKey)
         {
             this.trafficLogging = trafficLogging;
             /* stub */
@@ -174,13 +176,15 @@ namespace fnecore
         /// <param name="systemName"></param>
         /// <param name="peerId"></param>
         /// <param name="endpoint"></param>
-        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string PresharedKey = null, bool trafficLogging = false) : base(systemName, peerId)
+        /// <param name="presharedKey"></param>
+        /// <param name="trafficLogging"></param>
+        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string presharedKey = null, bool trafficLogging = false) : base(systemName, peerId)
         {
             masterEndpoint = endpoint;
             client = new UdpReceiver();
 
-            if (PresharedKey != null)
-                client.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(PresharedKey));
+            if (presharedKey != null)
+                client.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(presharedKey));
 
             info = new PeerInformation();
             info.PeerID = peerId;
@@ -977,6 +981,8 @@ namespace fnecore
 
                                                         jsonWriter.WriteEndObject();
                                                     }
+
+                                                    jsonWriter.WriteNumber("peerClass", (int)info.Details.PeerClass);
 
                                                     jsonWriter.WriteString("software", info.Details.Software);
 

@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022,2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022,2025,2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -177,6 +177,36 @@ namespace fnecore
         /// </summary>
         NXDN = 3
     } // public enum DVMState : byte
+
+    /// <summary>
+    /// Peer Connection Class Enumerations
+    /// </summary>
+    public enum PeerConnectionClass : byte
+    {
+        /// <summary>
+        /// Unknown
+        /// </summary>
+        PEER_CONN_CLASS_UNKNOWN,
+
+        /// <summary>
+        /// Neighbor FNE Peer
+        /// </summary>
+        PEER_CONN_CLASS_NEIGHBOR,
+
+        /// <summary>
+        /// Standard Peer
+        /// </summary>
+        PEER_CONN_CLASS_STANDARD,
+
+        /// <summary>
+        /// SysView Peer
+        /// </summary>
+        PEER_CONN_CLASS_SYSVIEW,
+        /// <summary>
+        /// Console Peer
+        /// </summary>
+        PEER_CONN_CLASS_CONSOLE,
+    } // public enum PeerConnectionClass : byte
 
     /// <summary>
     /// This class defines commonly used protocol and internal constants.

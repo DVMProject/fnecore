@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -115,6 +115,11 @@ namespace fnecore
         /// REST API Port
         /// </summary>
         public int Port;
+
+        /// <summary>
+        /// Peer Connection Class
+        /// </summary>
+        public PeerConnectionClass PeerClass = PeerConnectionClass.PEER_CONN_CLASS_STANDARD;
 
         /*
         ** Methods
