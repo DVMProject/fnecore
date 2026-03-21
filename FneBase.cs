@@ -43,19 +43,6 @@ namespace fnecore
         public uint TxFrequency;
 
         /// <summary>
-        /// Exteral Peer
-        /// </summary>
-        public bool ExternalPeer;
-        /// <summary>
-        /// Conventional Peer
-        /// </summary>
-        public bool ConventionalPeer;
-        /// <summary>
-        /// System View
-        /// </summary>
-        public bool SysView;
-
-        /// <summary>
         /// Software Identifier
         /// </summary>
         public string Software;
@@ -120,6 +107,23 @@ namespace fnecore
         /// Peer Connection Class
         /// </summary>
         public PeerConnectionClass PeerClass = PeerConnectionClass.PEER_CONN_CLASS_STANDARD;
+
+        /*
+        ** [deprecated] bryanb: this shit will need to be removed for R05A06 core
+        */
+
+        /// <summary>
+        /// Exteral Peer [DEPRECATED]
+        /// </summary>
+        public bool ExternalPeer;
+        /// <summary>
+        /// Conventional Peer [DEPRECATED]
+        /// </summary>
+        public bool ConventionalPeer;
+        /// <summary>
+        /// System View [DEPRECATED]
+        /// </summary>
+        public bool SysView;
 
         /*
         ** Methods

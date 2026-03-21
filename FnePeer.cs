@@ -939,11 +939,6 @@ namespace fnecore
                                                     jsonWriter.WriteNumber("rxFrequency", info.Details.RxFrequency);
                                                     jsonWriter.WriteNumber("txFrequency", info.Details.TxFrequency);
 
-                                                    // peer types
-                                                    jsonWriter.WriteBoolean("externalPeer", info.Details.ExternalPeer);
-                                                    jsonWriter.WriteBoolean("conventionalPeer", info.Details.ConventionalPeer);
-                                                    jsonWriter.WriteBoolean("sysView", info.Details.SysView);
-
                                                     // system info
                                                     {
                                                         jsonWriter.WritePropertyName("info");
@@ -982,7 +977,17 @@ namespace fnecore
                                                         jsonWriter.WriteEndObject();
                                                     }
 
-                                                    jsonWriter.WriteNumber("peerClass", (int)info.Details.PeerClass);
+                                                    // peer class
+                                                    {
+                                                        jsonWriter.WriteNumber("peerClass", (int)info.Details.PeerClass);
+
+                                                        /*
+                                                        ** [deprecated] bryanb: this shit will need to be removed for R05A06 core
+                                                        */
+                                                        jsonWriter.WriteBoolean("externalPeer", info.Details.ExternalPeer);
+                                                        jsonWriter.WriteBoolean("conventionalPeer", info.Details.ConventionalPeer);
+                                                        jsonWriter.WriteBoolean("sysView", info.Details.SysView);
+                                                    }
 
                                                     jsonWriter.WriteString("software", info.Details.Software);
 
