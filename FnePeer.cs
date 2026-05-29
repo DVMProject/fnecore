@@ -60,12 +60,15 @@ namespace fnecore
     {
         private const int MAX_MISSED_PEER_PINGS = 5;
 
-        private UdpReceiver client = null;
+        private UdpReceiver clientTraffic = null;
+        private UdpReceiver clientMetadata = null;
 
         private bool abortListening = false;
 
-        private CancellationTokenSource listenCancelToken = new CancellationTokenSource();
-        private Task listenTask = null;
+        private CancellationTokenSource listenTrafficCancelToken = new CancellationTokenSource();
+        private Task listenTrafficTask = null;
+        private CancellationTokenSource listenMetadataCancelToken = new CancellationTokenSource();
+        private Task listenMetadataTask = null;
         private CancellationTokenSource maintainenceCancelToken = new CancellationTokenSource();
         private Task maintainenceTask = null;
 
@@ -187,10 +190,11 @@ namespace fnecore
         {
             masterEndpoint = endpoint;
             metadataEndpoint = new IPEndPoint(endpoint.Address, endpoint.Port + 1);
-            client = new UdpReceiver();
+            clientTraffic = new UdpReceiver();
+            clientMetadata = new UdpReceiver();
 
             if (presharedKey != null)
-                client.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(presharedKey));
+                clientTraffic.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(presharedKey));
 
             info = new PeerInformation();
             info.PeerID = peerId;
@@ -216,7 +220,8 @@ namespace fnecore
             // attempt initial connection
             try
             {
-                client.Connect(masterEndpoint);
+                clientTraffic.Connect(masterEndpoint);
+                clientMetadata.Connect(metadataEndpoint);
             }
             catch (SocketException se)
             {
@@ -224,7 +229,8 @@ namespace fnecore
             }
 
             abortListening = false;
-            listenTask = Task.Factory.StartNew(Listen, listenCancelToken.Token);
+            listenTrafficTask = Task.Factory.StartNew(ListenTraffic, listenTrafficCancelToken.Token);
+            listenMetadataTask = Task.Factory.StartNew(ListenMetadata, listenMetadataCancelToken.Token);
             maintainenceTask = Task.Factory.StartNew(Maintainence, maintainenceCancelToken.Token);
 
             isStarted = true;
@@ -245,7 +251,8 @@ namespace fnecore
             // attempt initial connection
             try
             {
-                client.Connect(masterEndpoint);
+                clientTraffic.Connect(masterEndpoint);
+                clientMetadata.Connect(metadataEndpoint);
             }
             catch (SocketException se)
             {
@@ -253,7 +260,8 @@ namespace fnecore
             }
 
             abortListening = false;
-            listenTask = Task.Factory.StartNew(Listen, listenCancelToken.Token);
+            listenTrafficTask = Task.Factory.StartNew(ListenTraffic, listenTrafficCancelToken.Token);
+            listenMetadataTask = Task.Factory.StartNew(ListenMetadata, listenMetadataCancelToken.Token);
 
             isStarted = true;
         }
@@ -269,22 +277,38 @@ namespace fnecore
             Logger(LogLevel.INFO, $"({systemName}) stopping network services, {masterEndpoint}");
 
             // send shutdown opcode to server
-            SendMaster(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
 
-            // stop UDP listen task
-            if (listenTask != null)
+            // stop UDP listen traffic task
+            if (listenTrafficTask != null)
             {
                 abortListening = true;
-                listenCancelToken.Cancel();
+                listenTrafficCancelToken.Cancel();
 
                 try
                 {
-                    listenTask.GetAwaiter().GetResult();
+                    listenTrafficTask.GetAwaiter().GetResult();
                 }
                 catch (OperationCanceledException) { /* stub */ }
                 finally
                 {
-                    listenCancelToken.Dispose();
+                    listenTrafficCancelToken.Dispose();
+                }
+            }
+
+            // stop UDP listen metadata task
+            if (listenMetadataTask != null)
+            {
+                listenMetadataCancelToken.Cancel();
+
+                try
+                {
+                    listenMetadataTask.GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) { /* stub */ }
+                finally
+                {
+                    listenMetadataCancelToken.Dispose();
                 }
             }
 
@@ -308,15 +332,15 @@ namespace fnecore
         }
 
         /// <summary>
-        /// Helper to send a raw UDP frame.
+        /// Helper to send a raw UDP traffic frame.
         /// </summary>
         /// <param name="frame">UDP frame to send</param>
-        public void Send(UdpFrame frame)
+        public void SendTraffic(UdpFrame frame)
         {
             if (RawPacketTrace)
                 Log(LogLevel.DEBUG, $"({systemName}) Network Sent (to {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
 
-            client.Send(frame);
+            clientTraffic.Send(frame);
         }
 
         /// <summary>
@@ -327,16 +351,28 @@ namespace fnecore
         /// <param name="pktSeq">RTP Packet Sequence</param>
         /// <param name="streamId"></param>
         /// <param name="forceZeroStream"></param>
-        public void SendMaster(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
+        public void SendMasterTraffic(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
         {
             if (streamId == 0 && !forceZeroStream)
                 streamId = this.streamId;
 
-            Send(new UdpFrame()
+            SendTraffic(new UdpFrame()
             {
                 Endpoint = masterEndpoint,
                 Message = WriteFrame(message, peerId, this.peerId, opcode, pktSeq, streamId)
             });
+        }
+
+        /// <summary>
+        /// Helper to send a raw UDP metadata frame.
+        /// </summary>
+        /// <param name="frame">UDP frame to send</param>
+        public void SendMetadata(UdpFrame frame)
+        {
+            if (RawPacketTrace)
+                Log(LogLevel.DEBUG, $"({systemName}) Network Sent (to {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
+
+            clientMetadata.Send(frame);
         }
 
         /// <summary>
@@ -352,7 +388,7 @@ namespace fnecore
             if (streamId == 0 && !forceZeroStream)
                 streamId = this.streamId;
 
-            Send(new UdpFrame()
+            SendMetadata(new UdpFrame()
             {
                 Endpoint = metadataEndpoint,
                 Message = WriteFrame(message, peerId, this.peerId, opcode, pktSeq, streamId)
@@ -364,9 +400,9 @@ namespace fnecore
         /// </summary>
         /// <param name="opcode">Opcode</param>
         /// <param name="message">Byte array containing message to send</param>
-        public void SendMaster(Tuple<byte, byte> opcode, byte[] message)
+        public void SendMasterTraffic(Tuple<byte, byte> opcode, byte[] message)
         {
-            SendMaster(opcode, message, pktSeq());
+            SendMasterTraffic(opcode, message, pktSeq());
         }
 
         /// <summary>
@@ -382,7 +418,7 @@ namespace fnecore
             FneUtils.Write3Bytes(srcId, ref res, 0);
             FneUtils.Write3Bytes(dstId, ref res, 3);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
         }
 
         /// <summary>
@@ -405,7 +441,7 @@ namespace fnecore
                 offset += 8;
             }
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_AFFILS), buffer, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_AFFILS), buffer, 0, 0, true);
         }
 
         /// <summary>
@@ -419,7 +455,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_UNAFFIL), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_UNAFFIL), res, 0, 0, true);
         }
 
         /// <summary>
@@ -433,7 +469,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
         }
 
         /// <summary>
@@ -447,7 +483,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
         }
 
         /// <summary>
@@ -481,7 +517,7 @@ namespace fnecore
 
             Array.Copy(payload, 0, res, 11, payload.Length);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_KEY_REQ, Constants.NET_SUBFUNC_NOP), res, Constants.RtpCallEndSeq, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_KEY_REQ, Constants.NET_SUBFUNC_NOP), res, Constants.RtpCallEndSeq, 0, true);
         }
 
         /// <summary>
@@ -648,20 +684,20 @@ namespace fnecore
         }
 
         /// <summary>
-        /// Internal UDP listen routine.
+        /// Internal UDP listen traffic routine.
         /// </summary>
-        private async void Listen()
+        private async void ListenTraffic()
         {
-            CancellationToken ct = listenCancelToken.Token;
+            CancellationToken ct = listenTrafficCancelToken.Token;
             ct.ThrowIfCancellationRequested();
 
             while (!abortListening)
             {
                 try
                 {
-                    UdpFrame frame = await client.Receive();
+                    UdpFrame frame = await clientTraffic.Receive();
                     if (RawPacketTrace)
-                        Log(LogLevel.DEBUG, $"Network Received (from {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
+                        Log(LogLevel.DEBUG, $"Traffic Network Received (from {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
 
                     // decode RTP frame
                     if (frame.Message.Length <= 0)
@@ -684,7 +720,7 @@ namespace fnecore
                     }
 
                     // validate frame endpoint (traffic or metadata channel)
-                    if (frame.Endpoint.ToString() == masterEndpoint.ToString() || frame.Endpoint.ToString() == metadataEndpoint.ToString())
+                    if (frame.Endpoint.ToString() == masterEndpoint.ToString())
                     {
                         uint peerId = fneHeader.PeerID;
 
@@ -1068,7 +1104,7 @@ namespace fnecore
                                         FneUtils.StringToBytes(Constants.TAG_REPEATER_AUTH, res, 0, 4);
                                         FneUtils.WriteBytes(peerId, ref res, 4);
                                         Buffer.BlockCopy(calcHash, 0, res, 8, calcHash.Length);
-                                        SendMaster(CreateOpcode(Constants.NET_FUNC_RPTK), res);
+                                        SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPTK), res);
 
                                         info.State = ConnectionState.WAITING_AUTHORISATION;
                                     }
@@ -1151,7 +1187,7 @@ namespace fnecore
                                             FneUtils.StringToBytes(Constants.TAG_REPEATER_CONFIG, res, 0, 4);
                                             FneUtils.WriteBytes(peerId, ref res, 4);
                                             FneUtils.StringToBytes(json, res, 8, json.Length);
-                                            SendMaster(CreateOpcode(Constants.NET_FUNC_RPTC), res);
+                                            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPTC), res);
 
                                             info.State = ConnectionState.WAITING_CONFIG;
                                         }
@@ -1251,6 +1287,119 @@ namespace fnecore
                                 }
                                 break;
 
+                            default:
+                                // are we handling anything else with a user handler?
+                                if (UserPacketHandler != null)
+                                {
+                                    UserPacketHandler(frame, peerId, streamId, rtpHeader, fneHeader, message);
+                                    break;
+                                }
+
+                                Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
+                                break;
+                        }
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+                    RotateMasterEndpont();
+
+                    // reset states
+                    PingsSent = 0;
+                    PingsAcked = 0;
+                    info.State = ConnectionState.WAITING_LOGIN;
+
+                    clientTraffic.Connect(masterEndpoint);
+                }
+                catch (SocketException se)
+                {
+                    // what kind of socket error do we have?
+                    switch (se.SocketErrorCode)
+                    {
+                        case SocketError.NotConnected:
+                        case SocketError.ConnectionReset:
+                        case SocketError.ConnectionAborted:
+                        case SocketError.ConnectionRefused:
+                            Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
+                            RotateMasterEndpont();
+
+                            // reset states
+                            PingsSent = 0;
+                            PingsAcked = 0;
+                            info.State = ConnectionState.WAITING_LOGIN;
+
+                            clientTraffic.Connect(masterEndpoint);
+                            break;
+                        default:
+                            Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
+                            break;
+                    }
+                }
+
+                if (ct.IsCancellationRequested)
+                    abortListening = true;
+            }
+        }
+
+
+        /// <summary>
+        /// Internal UDP listen metadata routine.
+        /// </summary>
+        private async void ListenMetadata()
+        {
+            CancellationToken ct = listenMetadataCancelToken.Token;
+            ct.ThrowIfCancellationRequested();
+
+            while (!abortListening)
+            {
+                try
+                {
+                    UdpFrame frame = await clientMetadata.Receive();
+                    if (RawPacketTrace)
+                        Log(LogLevel.DEBUG, $"Metadata Network Received (from {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
+
+                    // decode RTP frame
+                    if (frame.Message.Length <= 0)
+                        continue;
+
+                    RtpHeader rtpHeader;
+                    RtpFNEHeader fneHeader;
+                    int messageLength = 0;
+                    byte[] message = ReadFrame(frame, out messageLength, out rtpHeader, out fneHeader);
+                    if (message == null)
+                    {
+                        Log(LogLevel.ERROR, $"({systemName}) Malformed packet (from {frame.Endpoint}); failed to decode RTP frame");
+                        continue;
+                    }
+
+                    if (message.Length < 1)
+                    {
+                        Log(LogLevel.WARNING, $"({systemName}) Malformed packet (from {frame.Endpoint}) -- {FneUtils.HexDump(message, 0)}");
+                        continue;
+                    }
+
+                    // validate frame endpoint (traffic or metadata channel)
+                    if (frame.Endpoint.ToString() == metadataEndpoint.ToString())
+                    {
+                        uint peerId = fneHeader.PeerID;
+
+                        if (streamId != fneHeader.StreamID)
+                            pktSeq(true);
+
+                        // update current peer stream ID
+                        streamId = fneHeader.StreamID;
+
+                        // see if the peer is defining its own frame handler, if it is try to handle the frame there
+                        if (NetworkFrameHandler != null)
+                        {
+                            if (NetworkFrameHandler(frame, peerId, streamId))
+                                continue;
+                        }
+
+                        // process incoming message frame opcodes
+                        switch (fneHeader.Function)
+                        {
                             case Constants.NET_FUNC_KEYS_INVENTORY:
                                 {
                                     if (this.peerId == peerId)
@@ -1307,15 +1456,8 @@ namespace fnecore
                 }
                 catch (InvalidOperationException)
                 {
-                    Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
-                    RotateMasterEndpont();
-
-                    // reset states
-                    PingsSent = 0;
-                    PingsAcked = 0;
-                    info.State = ConnectionState.WAITING_LOGIN;
-
-                    client.Connect(masterEndpoint);
+                    Log(LogLevel.WARNING, $"({systemName}) Metadata receiver entered invalid state; reconnecting metadata socket to {metadataEndpoint}");
+                    clientMetadata.Connect(metadataEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1326,15 +1468,8 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
-                            Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
-                            RotateMasterEndpont();
-
-                            // reset states
-                            PingsSent = 0;
-                            PingsAcked = 0;
-                            info.State = ConnectionState.WAITING_LOGIN;
-
-                            client.Connect(masterEndpoint);
+                            Log(LogLevel.WARNING, $"({systemName}) Metadata socket error {se.SocketErrorCode}; reconnecting metadata socket to {metadataEndpoint}");
+                            clientMetadata.Connect(metadataEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
@@ -1371,7 +1506,7 @@ namespace fnecore
                         byte[] res = new byte[8];
                         FneUtils.StringToBytes(Constants.TAG_REPEATER_LOGIN, res, 0, 4);
                         FneUtils.WriteBytes(peerId, ref res, 4);
-                        SendMaster(CreateOpcode(Constants.NET_FUNC_RPTL), res);
+                        SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPTL), res);
 
                         Log(LogLevel.INFO, $"({systemName}) Sending login request to MASTER {masterEndpoint}");
                     }
@@ -1389,13 +1524,13 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            client.Connect(masterEndpoint);
+                            clientTraffic.Connect(masterEndpoint);
                         }
                         else
                         {
                             // send message to master
                             byte[] res = new byte[1];
-                            SendMaster(CreateOpcode(Constants.NET_FUNC_PING), res, Constants.RtpCallEndSeq);
+                            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_PING), res, Constants.RtpCallEndSeq);
 
                             PingsSent++;
                             Log(LogLevel.DEBUG, $"({systemName}) RPTPING sent to MASTER {masterEndpoint}; pings since connected {PingsSent}");
@@ -1412,7 +1547,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    client.Connect(masterEndpoint);
+                    clientTraffic.Connect(masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1431,7 +1566,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            client.Connect(masterEndpoint);
+                            clientTraffic.Connect(masterEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");

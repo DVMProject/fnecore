@@ -1173,6 +1173,9 @@ namespace fnecore
             byte level = (byte)logLevel;
             if (level <= (byte)LogLevel)
                 Logger(logLevel, message);
+#if DEBUG || TRACE
+            System.Diagnostics.Trace.WriteLine($"{logLevel} {message}");
+#endif
         }
 
         /// <summary>

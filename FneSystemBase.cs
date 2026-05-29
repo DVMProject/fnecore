@@ -415,7 +415,7 @@ namespace fnecore
                     CreateDMRMessage(ref dmrpkt, callData, (byte)seqNo, n);
                     Buffer.BlockCopy(data, 0, dmrpkt, 20, DMR_FRAME_LENGTH_BYTES);
 
-                    peer.SendMaster(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
+                    peer.SendMasterTraffic(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
 
                     seqNo++;
                     dmrN++;
@@ -444,7 +444,7 @@ namespace fnecore
             CreateDMRMessage(ref dmrpkt, callData, (byte)seqNo, 0);
             Buffer.BlockCopy(data, 0, dmrpkt, 20, DMR_FRAME_LENGTH_BYTES);
 
-            peer.SendMaster(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
+            peer.SendMasterTraffic(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
 
             seqNo = 0;
             dmrN = 0;
@@ -524,7 +524,7 @@ namespace fnecore
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
-            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
+            peer.SendMasterTraffic(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
         }
 
         /// <summary>
@@ -544,7 +544,7 @@ namespace fnecore
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
-            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
+            peer.SendMasterTraffic(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
         }
     } // public abstract class FneSystemBase
 } // namespace fnecore

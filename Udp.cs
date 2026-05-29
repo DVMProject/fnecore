@@ -196,6 +196,7 @@ namespace fnecore
     public class UdpReceiver : UdpBase
     {
         private IPEndPoint endpoint;
+        private bool connected;
 
         /*
         ** Properties
@@ -247,7 +248,8 @@ namespace fnecore
                 return;
             }
 
-            client.Connect(endpoint.Address.ToString(), endpoint.Port); 
+            client.Connect(endpoint.Address.ToString(), endpoint.Port);
+            connected = true;
         }
 
         /// <summary>
@@ -260,6 +262,7 @@ namespace fnecore
             UdpReceiver recv = new UdpReceiver();
             this.endpoint = endpoint;
             client.Connect(endpoint.Address.ToString(), endpoint.Port);
+            connected = true;
         }
 
         /// <summary>
@@ -301,7 +304,10 @@ namespace fnecore
                 frame.Message = buffer;
             }
 
-            client.Send(frame.Message, frame.Message.Length);
+            if (connected)
+                client.Send(frame.Message, frame.Message.Length);
+            else
+                client.Send(frame.Message, frame.Message.Length, frame.Endpoint);
         }
     } // public class UdpReceiver : UdpBase
 } // namespace fnecore
