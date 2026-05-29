@@ -71,6 +71,7 @@ namespace fnecore
 
         private PeerInformation info;
         private IPEndPoint masterEndpoint = null;
+        private IPEndPoint metadataEndpoint = null;
 
         private ushort currPktSeq = 0;
         private uint streamId = 0;
@@ -185,6 +186,7 @@ namespace fnecore
         public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string presharedKey = null, bool trafficLogging = false) : base(systemName, peerId)
         {
             masterEndpoint = endpoint;
+            metadataEndpoint = new IPEndPoint(endpoint.Address, endpoint.Port + 1);
             client = new UdpReceiver();
 
             if (presharedKey != null)
@@ -333,6 +335,26 @@ namespace fnecore
             Send(new UdpFrame()
             {
                 Endpoint = masterEndpoint,
+                Message = WriteFrame(message, peerId, this.peerId, opcode, pktSeq, streamId)
+            });
+        }
+
+        /// <summary>
+        /// Helper to send a metadata message to the master metadata endpoint.
+        /// </summary>
+        /// <param name="opcode">Opcode</param>
+        /// <param name="message">Byte array containing message to send</param>
+        /// <param name="pktSeq">RTP Packet Sequence</param>
+        /// <param name="streamId"></param>
+        /// <param name="forceZeroStream"></param>
+        public void SendMasterMetadata(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
+        {
+            if (streamId == 0 && !forceZeroStream)
+                streamId = this.streamId;
+
+            Send(new UdpFrame()
+            {
+                Endpoint = metadataEndpoint,
                 Message = WriteFrame(message, peerId, this.peerId, opcode, pktSeq, streamId)
             });
         }
@@ -503,7 +525,7 @@ namespace fnecore
             Buffer.BlockCopy(remoteSalt, 0, req, 76, 4);
 
             uint requestStreamId = CreateStreamID();
-            SendMaster(CreateOpcode(Constants.NET_FUNC_KEYS_INVENTORY, Constants.NET_SUBFUNC_NOP), req,
+            SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_KEYS_INVENTORY, Constants.NET_SUBFUNC_NOP), req,
                 Constants.RtpCallEndSeq, requestStreamId, false);
 
             return requestStreamId;
@@ -559,7 +581,7 @@ namespace fnecore
             Buffer.BlockCopy(remoteSalt, 0, authReq, 76, 4);
 
             uint requestStreamId = CreateStreamID();
-            SendMaster(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), authReq,
+            SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), authReq,
                 Constants.RtpCallEndSeq, requestStreamId, false);
 
             // Phase 2: send compressed/chunked key container payload.
@@ -568,7 +590,7 @@ namespace fnecore
 
             foreach (var fragment in pkt.Fragments.OrderBy(x => x.Key))
             {
-                SendMaster(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), fragment.Value.Data,
+                SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), fragment.Value.Data,
                     0, requestStreamId, false);
 
                 if (paceMs > 0)
@@ -619,6 +641,7 @@ namespace fnecore
 
                 Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
                 masterEndpoint = entry.EndPoint;
+                metadataEndpoint = new IPEndPoint(masterEndpoint.Address, masterEndpoint.Port + 1);
             }
 
             ++retryCount;
@@ -660,8 +683,8 @@ namespace fnecore
                         continue;
                     }
 
-                    // validate frame endpoint
-                    if (frame.Endpoint.ToString() == masterEndpoint.ToString())
+                    // validate frame endpoint (traffic or metadata channel)
+                    if (frame.Endpoint.ToString() == masterEndpoint.ToString() || frame.Endpoint.ToString() == metadataEndpoint.ToString())
                     {
                         uint peerId = fneHeader.PeerID;
 
