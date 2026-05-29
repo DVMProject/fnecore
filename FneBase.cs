@@ -915,6 +915,43 @@ namespace fnecore
     }
 
     /// <summary>
+    /// Event called when a key inventory transfer is received and reassembled.
+    /// </summary>
+    public class KeyInventoryEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID associated with the transfer.
+        /// </summary>
+        public uint PeerId { get; set; }
+
+        /// <summary>
+        /// Stream ID associated with the transfer.
+        /// </summary>
+        public uint StreamId { get; set; }
+
+        /// <summary>
+        /// Reassembled key inventory payload.
+        /// </summary>
+        public byte[] Data { get; set; }
+
+        /// <summary>
+        /// Length of the reassembled payload.
+        /// </summary>
+        public uint Length { get; set; }
+
+        /*
+        ** Methods
+        */
+        public KeyInventoryEvent(uint peerId, uint streamId, byte[] data, uint length) : base()
+        {
+            this.PeerId = peerId;
+            this.StreamId = streamId;
+            this.Data = data;
+            this.Length = length;
+        }
+    }
+
+    /// <summary>
     /// This class implements some base functionality for all other FNE network classes.
     /// </summary>
     public abstract class FneBase
@@ -1050,6 +1087,11 @@ namespace fnecore
         /// Event action thats called when a key response is received
         /// </summary>
         public event EventHandler<KeyResponseEvent> KeyResponse;
+
+        /// <summary>
+        /// Event action thats called when a key inventory transfer is received.
+        /// </summary>
+        public event EventHandler<KeyInventoryEvent> KeyInventory;
 
         /// <summary>
         /// Callback action that handles internal logging.
@@ -1356,6 +1398,16 @@ namespace fnecore
         {
             if (KeyResponse != null)
                 KeyResponse.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the key inventory event.
+        /// </summary>
+        /// <param name="e"></param>
+        protected void FireKeyInventory(KeyInventoryEvent e)
+        {
+            if (KeyInventory != null)
+                KeyInventory.Invoke(this, e);
         }
     } // public abstract class FneBase
 } // namespace fnecore

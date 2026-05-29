@@ -22,6 +22,7 @@ using System.Text;
 using System.Text.Json;
 using System.Linq;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 
 using fnecore.DMR;
 using fnecore.P25;
@@ -82,6 +83,9 @@ namespace fnecore
         private int maxRetryCount = Constants.MAX_RETRY_BEFORE_RECONNECT;
 
         private bool trafficLogging;
+
+        private readonly object keyInventoryLock = new object();
+        private readonly Dictionary<uint, PacketBuffer> keyInventoryPackets = new Dictionary<uint, PacketBuffer>();
 
         /*
         ** Properties
@@ -220,6 +224,34 @@ namespace fnecore
             abortListening = false;
             listenTask = Task.Factory.StartNew(Listen, listenCancelToken.Token);
             maintainenceTask = Task.Factory.StartNew(Maintainence, maintainenceCancelToken.Token);
+
+            isStarted = true;
+        }
+
+        /// <summary>
+        /// Starts the main execution loop for this <see cref="FnePeer"/> without starting the maintainence task.
+        /// </summary>
+        /// <remarks>Normally, the maintainence task is used to send periodic pings to the master. However, this method is 
+        /// useful for when the user wants to handle initial login and ping scheduling manually.</remarks>
+        public void StartWithoutMaintainence()
+        {
+            if (isStarted)
+                throw new InvalidOperationException("Cannot start listening when already started.");
+
+            Logger(LogLevel.INFO, $"({systemName}) starting network services, {masterEndpoint}");
+
+            // attempt initial connection
+            try
+            {
+                client.Connect(masterEndpoint);
+            }
+            catch (SocketException se)
+            {
+                Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
+            }
+
+            abortListening = false;
+            listenTask = Task.Factory.StartNew(Listen, listenCancelToken.Token);
 
             isStarted = true;
         }
@@ -428,6 +460,123 @@ namespace fnecore
             Array.Copy(payload, 0, res, 11, payload.Length);
 
             SendMaster(CreateOpcode(Constants.NET_FUNC_KEY_REQ, Constants.NET_SUBFUNC_NOP), res, Constants.RtpCallEndSeq, 0, true);
+        }
+
+        /// <summary>
+        /// Helper to send a key inventory request to the master.
+        /// </summary>
+        /// <param name="remoteAccessPassword">Remote access password configured on the FNE.</param>
+        /// <returns>Stream ID used for the request.</returns>
+        public uint SendMasterKeyInventoryRequest(string remoteAccessPassword)
+        {
+            if (string.IsNullOrEmpty(Passphrase))
+                throw new InvalidOperationException("Passphrase must be set before requesting key inventory.");
+
+            if (remoteAccessPassword == null)
+                throw new ArgumentNullException(nameof(remoteAccessPassword));
+
+            byte[] req = new byte[80];
+
+            byte[] peerSalt = new byte[4];
+            byte[] remoteSalt = new byte[4];
+            using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(peerSalt);
+                rng.GetBytes(remoteSalt);
+            }
+
+            byte[] peerPasswordBytes = Encoding.ASCII.GetBytes(Passphrase);
+            byte[] peerHashInput = new byte[peerSalt.Length + peerPasswordBytes.Length];
+            Buffer.BlockCopy(peerSalt, 0, peerHashInput, 0, peerSalt.Length);
+            Buffer.BlockCopy(peerPasswordBytes, 0, peerHashInput, peerSalt.Length, peerPasswordBytes.Length);
+            byte[] peerHash = FneUtils.sha256_hash(peerHashInput);
+
+            byte[] remotePasswordBytes = Encoding.ASCII.GetBytes(remoteAccessPassword);
+            byte[] remoteHashInput = new byte[remoteSalt.Length + remotePasswordBytes.Length];
+            Buffer.BlockCopy(remoteSalt, 0, remoteHashInput, 0, remoteSalt.Length);
+            Buffer.BlockCopy(remotePasswordBytes, 0, remoteHashInput, remoteSalt.Length, remotePasswordBytes.Length);
+            byte[] remoteHash = FneUtils.sha256_hash(remoteHashInput);
+
+            Buffer.BlockCopy(peerHash, 0, req, 8, 32);
+            Buffer.BlockCopy(peerSalt, 0, req, 40, 4);
+            Buffer.BlockCopy(remoteHash, 0, req, 44, 32);
+            Buffer.BlockCopy(remoteSalt, 0, req, 76, 4);
+
+            uint requestStreamId = CreateStreamID();
+            SendMaster(CreateOpcode(Constants.NET_FUNC_KEYS_INVENTORY, Constants.NET_SUBFUNC_NOP), req,
+                Constants.RtpCallEndSeq, requestStreamId, false);
+
+            return requestStreamId;
+        }
+
+        /// <summary>
+        /// Helper to send a key update request and stream a chunked key container to the master.
+        /// </summary>
+        /// <param name="keyContainer">Raw key container bytes.</param>
+        /// <param name="remoteAccessPassword">Remote access password configured on the FNE.</param>
+        /// <param name="paceMs">Inter-fragment pacing in milliseconds.</param>
+        /// <returns>Stream ID used for the request/transfer.</returns>
+        public uint SendMasterKeyUpdateRequest(byte[] keyContainer, string remoteAccessPassword, int paceMs = 60)
+        {
+            if (keyContainer == null)
+                throw new ArgumentNullException(nameof(keyContainer));
+
+            if (keyContainer.Length == 0)
+                throw new ArgumentException("Key container cannot be empty.", nameof(keyContainer));
+
+            if (string.IsNullOrEmpty(Passphrase))
+                throw new InvalidOperationException("Passphrase must be set before requesting key update.");
+
+            if (remoteAccessPassword == null)
+                throw new ArgumentNullException(nameof(remoteAccessPassword));
+
+            // Phase 1: authenticate key update request.
+            byte[] authReq = new byte[80];
+
+            byte[] peerSalt = new byte[4];
+            byte[] remoteSalt = new byte[4];
+            using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(peerSalt);
+                rng.GetBytes(remoteSalt);
+            }
+
+            byte[] peerPasswordBytes = Encoding.ASCII.GetBytes(Passphrase);
+            byte[] peerHashInput = new byte[peerSalt.Length + peerPasswordBytes.Length];
+            Buffer.BlockCopy(peerSalt, 0, peerHashInput, 0, peerSalt.Length);
+            Buffer.BlockCopy(peerPasswordBytes, 0, peerHashInput, peerSalt.Length, peerPasswordBytes.Length);
+            byte[] peerHash = FneUtils.sha256_hash(peerHashInput);
+
+            byte[] remotePasswordBytes = Encoding.ASCII.GetBytes(remoteAccessPassword);
+            byte[] remoteHashInput = new byte[remoteSalt.Length + remotePasswordBytes.Length];
+            Buffer.BlockCopy(remoteSalt, 0, remoteHashInput, 0, remoteSalt.Length);
+            Buffer.BlockCopy(remotePasswordBytes, 0, remoteHashInput, remoteSalt.Length, remotePasswordBytes.Length);
+            byte[] remoteHash = FneUtils.sha256_hash(remoteHashInput);
+
+            Buffer.BlockCopy(peerHash, 0, authReq, 8, 32);
+            Buffer.BlockCopy(peerSalt, 0, authReq, 40, 4);
+            Buffer.BlockCopy(remoteHash, 0, authReq, 44, 32);
+            Buffer.BlockCopy(remoteSalt, 0, authReq, 76, 4);
+
+            uint requestStreamId = CreateStreamID();
+            SendMaster(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), authReq,
+                Constants.RtpCallEndSeq, requestStreamId, false);
+
+            // Phase 2: send compressed/chunked key container payload.
+            PacketBuffer pkt = new PacketBuffer(true, "Remote EKC, Key Update");
+            pkt.Encode(keyContainer);
+
+            foreach (var fragment in pkt.Fragments.OrderBy(x => x.Key))
+            {
+                SendMaster(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), fragment.Value.Data,
+                    0, requestStreamId, false);
+
+                if (paceMs > 0)
+                    Thread.Sleep(paceMs);
+            }
+
+            pkt.Clear();
+            return requestStreamId;
         }
 
         /// <summary>
@@ -1081,9 +1230,42 @@ namespace fnecore
 
                             case Constants.NET_FUNC_KEYS_INVENTORY:
                                 {
-                                    /*
-                                    ** TODO TODO TODO
-                                    */
+                                    if (this.peerId == peerId)
+                                    {
+                                        PacketBuffer packetBuffer;
+                                        lock (keyInventoryLock)
+                                        {
+                                            if (!keyInventoryPackets.TryGetValue(streamId, out packetBuffer))
+                                            {
+                                                packetBuffer = new PacketBuffer(true, "Remote EKC, Key Inventory");
+                                                keyInventoryPackets[streamId] = packetBuffer;
+                                            }
+                                        }
+
+                                        try
+                                        {
+                                            if (packetBuffer.Decode(message, out byte[] payload, out uint payloadLength))
+                                            {
+                                                if (payload != null && payloadLength > 0)
+                                                    FireKeyInventory(new KeyInventoryEvent(peerId, streamId, payload, payloadLength));
+
+                                                lock (keyInventoryLock)
+                                                {
+                                                    packetBuffer.Clear();
+                                                    keyInventoryPackets.Remove(streamId);
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Log(LogLevel.ERROR, $"({systemName}) KEYS_INVENTORY stream {streamId} decode failure: {ex.Message}");
+                                            lock (keyInventoryLock)
+                                            {
+                                                packetBuffer.Clear();
+                                                keyInventoryPackets.Remove(streamId);
+                                            }
+                                        }
+                                    }
                                 }
                                 break;
 
