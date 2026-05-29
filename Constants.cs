@@ -275,6 +275,9 @@ namespace fnecore
         public const byte NET_FUNC_ACK = 0x7E;                                  // Packet Acknowledge
         public const byte NET_FUNC_NAK = 0x7F;                                  // Packet Negative Acknowledge
 
+        public const byte NET_FUNC_KEYS_INVENTORY = 0x8E;                       // Encryption Key Container Inventory
+        public const byte NET_FUNC_KEYS_UPDATE = 0x8F;                          // Encryption Key Container Update
+
         public const byte NET_FUNC_TRANSFER = 0x90;                             // Network Transfer Function
         public const byte NET_TRANSFER_SUBFUNC_ACTIVITY = 0x01;                 // Activity Log Transfer
         public const byte NET_TRANSFER_SUBFUNC_DIAG = 0x02;                     // Diagnostic Log Transfer

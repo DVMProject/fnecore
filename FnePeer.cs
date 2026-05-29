@@ -778,6 +778,30 @@ namespace fnecore
                                 }
                                 break;
 
+                            case Constants.NET_FUNC_MST_CLOSING:                                            // Master Closing (Disconnect)
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        info.State = ConnectionState.WAITING_LOGIN;
+                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTCL received");
+
+                                        // userland actions
+                                        if (PeerDisconnected != null)
+                                            PeerDisconnected(peerId);
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_PONG:                                                   // Master Ping Response
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        PingsAcked++;
+                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTPONG received, pongs since connected {PingsAcked}");
+                                    }
+                                }
+                                break;
+
                             case Constants.NET_FUNC_INCALL_CTRL:                                            // In-Call Control
                                 {
                                     if (this.peerId == peerId)
@@ -831,74 +855,27 @@ namespace fnecore
                                 }
                                 break;
 
-                            case Constants.NET_FUNC_NAK:                                                    // Master NAK
+                            case Constants.NET_FUNC_KEY_RSP:                                               // Key Response
+                                if (this.peerId == peerId)
                                 {
-                                    if (this.peerId == peerId)
+                                    byte[] payload = message.Skip(11).ToArray();
+
+                                    byte messageId = payload[0];
+
+                                    if (messageId == (byte)KmmMessageType.MODIFY_KEY_CMD)
                                     {
-                                        // DVM 3.6 adds support to respond with a NAK reason, as such we just check if the NAK response is greater
-                                        // then 10 bytes and process the reason value
-                                        ConnectionMSTNAK reason = ConnectionMSTNAK.INVALID;
-                                        if (message.Length > 10)
-                                        {
-                                            reason = (ConnectionMSTNAK)FneUtils.ToUInt16(message, 10);
-                                            switch (reason)
-                                            {
-                                                case ConnectionMSTNAK.MODE_NOT_ENABLED:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; digital mode not enabled on FNE");
-                                                    break;
-                                                case ConnectionMSTNAK.ILLEGAL_PACKET:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; illegal/unknown packet");
-                                                    break;
-                                                case ConnectionMSTNAK.FNE_UNAUTHORIZED:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; unauthorized");
-                                                    break;
-                                                case ConnectionMSTNAK.BAD_CONN_STATE:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; bad connection state");
-                                                    break;
-                                                case ConnectionMSTNAK.INVALID_CONFIG_DATA:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; invalid configuration data");
-                                                    break;
-                                                case ConnectionMSTNAK.FNE_MAX_CONN:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; FNE has reached maximum permitted connections");
-                                                    break;
-                                                case ConnectionMSTNAK.PEER_RESET:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; FNE demanded connection reset");
-                                                    break;
-                                                case ConnectionMSTNAK.PEER_ACL:
-                                                    Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master NAK; ACL rejection, network disabled");
-                                                    info.State = ConnectionState.WAITING_LOGIN;
-                                                    Stop();
-                                                    break;
+                                        KmmModifyKey modifyKey = new KmmModifyKey();
+                                        modifyKey.Decode(payload);
 
-                                                case ConnectionMSTNAK.GENERAL_FAILURE:
-                                                default:
-                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; general failure");
-                                                    break;
-                                            }
-                                        }
-
-                                        if (info.State == ConnectionState.RUNNING && (reason == ConnectionMSTNAK.FNE_MAX_CONN))
-                                        {
-                                            Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; attemping to relogin");
-
-                                            // reset states
-                                            PingsSent = 0;
-                                            PingsAcked = 0;
-                                            info.State = ConnectionState.WAITING_LOGIN;
-                                        }
-                                        else
-                                        {
-                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master NAK; network reconnect");
-
-                                            // reset states
-                                            PingsSent = 0;
-                                            PingsAcked = 0;
-                                            info.State = ConnectionState.WAITING_LOGIN;
-                                            break;
-                                        }
+                                        FireKeyResponse(new KeyResponseEvent(messageId, modifyKey, message));
+                                    }
+                                    else
+                                    {
+                                        Log(LogLevel.WARNING, $"Unknown KEY_RSP Message ID: {messageId}");
                                     }
                                 }
                                 break;
+
                             case Constants.NET_FUNC_ACK:                                                    // Repeater ACK
                                 {
                                     if (info.State == ConnectionState.WAITING_LOGIN)                        // Repeater Login
@@ -1033,46 +1010,80 @@ namespace fnecore
                                     }
                                 }
                                 break;
-                            case Constants.NET_FUNC_MST_CLOSING:                                            // Master Closing (Disconnect)
+                            case Constants.NET_FUNC_NAK:                                                    // Master NAK
                                 {
                                     if (this.peerId == peerId)
                                     {
-                                        info.State = ConnectionState.WAITING_LOGIN;
-                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTCL received");
+                                        // DVM 3.6 adds support to respond with a NAK reason, as such we just check if the NAK response is greater
+                                        // then 10 bytes and process the reason value
+                                        ConnectionMSTNAK reason = ConnectionMSTNAK.INVALID;
+                                        if (message.Length > 10)
+                                        {
+                                            reason = (ConnectionMSTNAK)FneUtils.ToUInt16(message, 10);
+                                            switch (reason)
+                                            {
+                                                case ConnectionMSTNAK.MODE_NOT_ENABLED:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; digital mode not enabled on FNE");
+                                                    break;
+                                                case ConnectionMSTNAK.ILLEGAL_PACKET:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; illegal/unknown packet");
+                                                    break;
+                                                case ConnectionMSTNAK.FNE_UNAUTHORIZED:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; unauthorized");
+                                                    break;
+                                                case ConnectionMSTNAK.BAD_CONN_STATE:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; bad connection state");
+                                                    break;
+                                                case ConnectionMSTNAK.INVALID_CONFIG_DATA:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; invalid configuration data");
+                                                    break;
+                                                case ConnectionMSTNAK.FNE_MAX_CONN:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; FNE has reached maximum permitted connections");
+                                                    break;
+                                                case ConnectionMSTNAK.PEER_RESET:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; FNE demanded connection reset");
+                                                    break;
+                                                case ConnectionMSTNAK.PEER_ACL:
+                                                    Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master NAK; ACL rejection, network disabled");
+                                                    info.State = ConnectionState.WAITING_LOGIN;
+                                                    Stop();
+                                                    break;
 
-                                        // userland actions
-                                        if (PeerDisconnected != null)
-                                            PeerDisconnected(peerId);
+                                                case ConnectionMSTNAK.GENERAL_FAILURE:
+                                                default:
+                                                    Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; general failure");
+                                                    break;
+                                            }
+                                        }
+
+                                        if (info.State == ConnectionState.RUNNING && (reason == ConnectionMSTNAK.FNE_MAX_CONN))
+                                        {
+                                            Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId} master NAK; attemping to relogin");
+
+                                            // reset states
+                                            PingsSent = 0;
+                                            PingsAcked = 0;
+                                            info.State = ConnectionState.WAITING_LOGIN;
+                                        }
+                                        else
+                                        {
+                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master NAK; network reconnect");
+
+                                            // reset states
+                                            PingsSent = 0;
+                                            PingsAcked = 0;
+                                            info.State = ConnectionState.WAITING_LOGIN;
+                                            break;
+                                        }
                                     }
                                 }
                                 break;
-                            case Constants.NET_FUNC_PONG:                                                   // Master Ping Response
+
+                            case Constants.NET_FUNC_KEYS_INVENTORY:
                                 {
-                                    if (this.peerId == peerId)
-                                    {
-                                        PingsAcked++;
-                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTPONG received, pongs since connected {PingsAcked}");
-                                    }
-                                }
-                                break;
-                            case Constants.NET_FUNC_KEY_RSP:                                               // Key Response
-                                if (this.peerId == peerId)
-                                {
-                                    byte[] payload = message.Skip(11).ToArray();
-
-                                    byte messageId = payload[0];
-
-                                    if (messageId == (byte)KmmMessageType.MODIFY_KEY_CMD)
-                                    {
-                                        KmmModifyKey modifyKey = new KmmModifyKey();
-                                        modifyKey.Decode(payload);
-
-                                        FireKeyResponse(new KeyResponseEvent(messageId, modifyKey, message));
-                                    }
-                                    else
-                                    {
-                                        Log(LogLevel.WARNING, $"Unknown KEY_RSP Message ID: {messageId}");
-                                    }
+                                    /*
+                                    ** TODO TODO TODO
+                                    */
                                 }
                                 break;
 
