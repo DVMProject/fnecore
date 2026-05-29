@@ -113,7 +113,7 @@ namespace fnecore
         /// <param name="message">Buffer containing assembled message.</param>
         /// <param name="outLength">Length of assembled message.</param>
         /// <returns><c>true</c> if a complete packet has been assembled; otherwise <c>false</c>.</returns>
-        public bool Decode(ReadOnlySpan<byte> data, out byte[]? message, out uint outLength)
+        public bool Decode(ReadOnlySpan<byte> data, out byte[] message, out uint outLength)
         {
             message = null;
             outLength = 0;
@@ -158,7 +158,7 @@ namespace fnecore
                 if (fragments.Count != (blockCnt + 1))
                     return false;
 
-                if (!fragments.TryGetValue(0, out Fragment? first) || first is null)
+                if (!fragments.TryGetValue(0, out Fragment first) || first is null)
                 {
                     ClearLocked();
                     return false;
@@ -184,7 +184,7 @@ namespace fnecore
 
                 for (byte i = 0; i <= blockCnt; i++)
                 {
-                    if (!fragments.TryGetValue(i, out Fragment? block) || block is null)
+                    if (!fragments.TryGetValue(i, out Fragment block) || block is null)
                     {
                         ClearLocked();
                         return false;
