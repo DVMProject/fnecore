@@ -491,14 +491,16 @@ namespace fnecore
         /// </summary>
         /// <param name="algId"></param>
         /// <param name="kId"></param>
-        public void SendMasterKeyRequest(byte algId, ushort kId)
+        /// <param name="srcLlId"></param>
+        public void SendMasterKeyRequest(byte algId, ushort kId, uint srcLlId = 0)
         {
             byte[] res = new byte[32];
 
             KmmModifyKey modifyKey = new KmmModifyKey
             {
                 AlgId = algId,
-                KeyId = kId
+                KeyId = kId,
+                SrcLlId = srcLlId
             };
 
             KeysetItem ks = new KeysetItem

@@ -24,8 +24,8 @@ namespace fnecore.P25.KMM
         public ushort MessageLength { get; set; }
         public byte RespKind { get; private set; } = 0;
         public bool Complete { get; private set; } = true;
-        public ushort DstLlId { get; private set; }
-        public ushort SrcLlId { get; private set; }
+        public uint DstLlId { get; private set; }
+        public uint SrcLlId { get; set; }
 
         /// <summary>
         /// Creates an instance of <see cref="KmmFrame"/>
@@ -44,15 +44,15 @@ namespace fnecore.P25.KMM
         /// <exception cref="ArgumentException"></exception>
         protected void EncodeHeader(byte[] data)
         {
-            if (data.Length < 8)
+            if (data.Length < 10)
                 throw new ArgumentException("Data buffer too small");
 
             data[0] = MessageId;
             FneUtils.WriteBytes(Length, ref data, 1);
 
             data[3] = (byte)((RespKind << 6) | (Complete ? 0x00 : 0x01));
-            FneUtils.WriteBytes(DstLlId, ref data, 4);
-            FneUtils.WriteBytes(SrcLlId, ref data, 6);
+            FneUtils.Write3Bytes(DstLlId, ref data, 4);
+            FneUtils.Write3Bytes(SrcLlId, ref data, 7);
         }
 
         /// <summary>
@@ -62,15 +62,15 @@ namespace fnecore.P25.KMM
         /// <exception cref="ArgumentException"></exception>
         protected void DecodeHeader(byte[] data)
         {
-            if (data.Length < 8)
+            if (data.Length < 10)
                 throw new ArgumentException("Data buffer too small");
 
             MessageId = data[0];
             MessageLength = FneUtils.ToUInt16(data, 1);
             RespKind = (byte)((data[3] >> 6) & 0x03);
             Complete = (data[3] & 0x01) == 0;
-            DstLlId = FneUtils.ToUInt16(data, 4);
-            SrcLlId = FneUtils.ToUInt16(data, 6);
+            DstLlId = FneUtils.Bytes3ToUInt32(data, 4);
+            SrcLlId = FneUtils.Bytes3ToUInt32(data, 7);
         }
     } // public class KmmFrame
 } // namespace fnecore.P25.kmm
