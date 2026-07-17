@@ -88,6 +88,8 @@ namespace fnecore
 
         private bool trafficLogging;
 
+        private byte[] kmfPresharedKey = null;
+
         private readonly object keyInventoryLock = new object();
         private readonly Dictionary<uint, PacketBuffer> keyInventoryPackets = new Dictionary<uint, PacketBuffer>();
 
@@ -194,7 +196,10 @@ namespace fnecore
             clientMetadata = new UdpReceiver();
 
             if (presharedKey != null)
-                clientTraffic.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(presharedKey));
+            {
+                byte[] parsedPresharedKey = FneUtils.ConvertHexStringToPresharedKey(presharedKey);
+                clientTraffic.SetPresharedKey(parsedPresharedKey);
+            }
 
             info = new PeerInformation();
             info.PeerID = peerId;
@@ -205,6 +210,37 @@ namespace fnecore
             PingsAcked = 0;
 
             this.trafficLogging = trafficLogging;
+        }
+
+        /// <summary>
+        /// Sets the KMF preshared key used to decrypt encrypted key material in KEY_RSP.
+        /// </summary>
+        /// <param name="presharedKey">32-byte preshared key.</param>
+        public void SetKMFPresharedKey(byte[] presharedKey)
+        {
+            if (presharedKey == null)
+            {
+                kmfPresharedKey = null;
+                return;
+            }
+
+            kmfPresharedKey = new byte[presharedKey.Length];
+            Buffer.BlockCopy(presharedKey, 0, kmfPresharedKey, 0, presharedKey.Length);
+        }
+
+        /// <summary>
+        /// Sets the KMF preshared key used to decrypt encrypted key material in KEY_RSP.
+        /// </summary>
+        /// <param name="presharedKeyHex">64-character hexadecimal key.</param>
+        public void SetKMFPresharedKey(string presharedKeyHex)
+        {
+            if (presharedKeyHex == null)
+            {
+                kmfPresharedKey = null;
+                return;
+            }
+
+            SetKMFPresharedKey(FneUtils.ConvertHexStringToPresharedKey(presharedKeyHex));
         }
 
         /// <summary>
@@ -491,8 +527,8 @@ namespace fnecore
         /// </summary>
         /// <param name="algId"></param>
         /// <param name="kId"></param>
-        /// <param name="srcLlId"></param>
-        public void SendMasterKeyRequest(byte algId, ushort kId, uint srcLlId = 0)
+        /// <param name="srcLLId"></param>
+        public void SendMasterKeyRequest(byte algId, ushort kId, uint srcLLId = 0)
         {
             byte[] res = new byte[32];
 
@@ -500,7 +536,7 @@ namespace fnecore
             {
                 AlgId = algId,
                 KeyId = kId,
-                SrcLlId = srcLlId
+                SrcLlId = srcLLId
             };
 
             KeysetItem ks = new KeysetItem
@@ -637,6 +673,37 @@ namespace fnecore
 
             pkt.Clear();
             return requestStreamId;
+        }
+
+        /// <summary>
+        /// Decrypts encrypted key material using the configured KMF preshared key.
+        /// </summary>
+        /// <param name="encryptedKey">Encrypted key material.</param>
+        /// <param name="presharedKey">KMF preshared key.</param>
+        /// <returns>Decrypted key material.</returns>
+        private static byte[] DecryptPeerEncryptedKey(byte[] encryptedKey, byte[] presharedKey)
+        {
+            if (encryptedKey == null)
+                throw new ArgumentNullException(nameof(encryptedKey));
+            if (presharedKey == null)
+                throw new ArgumentNullException(nameof(presharedKey));
+
+            byte[] paddedEncryptedKey = new byte[32];
+            Buffer.BlockCopy(encryptedKey, 0, paddedEncryptedKey, 0, Math.Min(encryptedKey.Length, paddedEncryptedKey.Length));
+
+            using (Aes aes = Aes.Create())
+            {
+                aes.KeySize = 256;
+                aes.BlockSize = 128;
+                aes.Mode = CipherMode.ECB;
+                aes.Padding = PaddingMode.None;
+                aes.Key = presharedKey;
+
+                using (ICryptoTransform decryptor = aes.CreateDecryptor())
+                {
+                    return decryptor.TransformFinalBlock(paddedEncryptedKey, 0, paddedEncryptedKey.Length);
+                }
+            }
         }
 
         /// <summary>
@@ -1076,6 +1143,49 @@ namespace fnecore
                                     {
                                         KmmModifyKey modifyKey = new KmmModifyKey();
                                         modifyKey.Decode(payload);
+
+                                        if (modifyKey.AlgId > 0 && modifyKey.KeysetItem.Keys.Count > 0)
+                                        {
+                                            KeyItem firstKey = modifyKey.KeysetItem.Keys[0];
+                                            Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId}, master reported enc. key, algId = ${modifyKey.KeysetItem.AlgId:X2}, kID = ${firstKey.KeyId:X4}");
+
+                                            if (modifyKey.DecryptInfoFmt == P25Defines.KMM_DECRYPT_PEER_ENC)
+                                            {
+                                                if (kmfPresharedKey != null)
+                                                {
+                                                    byte[] decryptedKey = DecryptPeerEncryptedKey(firstKey.GetKey(), kmfPresharedKey);
+
+                                                    int keyLength = 32;
+                                                    switch (modifyKey.KeysetItem.AlgId)
+                                                    {
+                                                        case P25Defines.P25_ALGO_DES:
+                                                            keyLength = 8;
+                                                            break;
+                                                        case P25Defines.P25_ALGO_ARC4:
+                                                            keyLength = 5;
+                                                            break;
+
+                                                        case P25Defines.P25_ALGO_AES:
+                                                        default:
+                                                            keyLength = 32;
+                                                            break;
+                                                    }
+
+                                                    if (modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_DES &&
+                                                        modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_ARC4 &&
+                                                        modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_AES)
+                                                        Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId}, unknown algorithm ID ${modifyKey.KeysetItem.AlgId:X2}, unable to determine key length");
+
+                                                    firstKey.SetKey(decryptedKey.Take(keyLength).ToArray(), (uint)keyLength);
+                                                    modifyKey.KeysetItem.KeyLength = (byte)keyLength;
+                                                }
+                                                else
+                                                {
+                                                    Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId}, received encrypted enc. key, but no preshared key available, algId = ${modifyKey.KeysetItem.AlgId:X2}, kID = ${firstKey.KeyId:X4}");
+                                                    break;
+                                                }
+                                            }
+                                        }
 
                                         FireKeyResponse(new KeyResponseEvent(messageId, modifyKey, message));
                                     }
