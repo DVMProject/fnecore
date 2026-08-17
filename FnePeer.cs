@@ -93,6 +93,9 @@ namespace fnecore
         private readonly object keyInventoryLock = new object();
         private readonly Dictionary<uint, PacketBuffer> keyInventoryPackets = new Dictionary<uint, PacketBuffer>();
 
+        private readonly object radioAliasSyncLock = new object();
+        private readonly Dictionary<uint, PacketBuffer> radioAliasSyncPackets = new Dictionary<uint, PacketBuffer>();
+
         /*
         ** Properties
         */
@@ -520,6 +523,22 @@ namespace fnecore
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
             SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
+        }
+
+        /// <summary>
+        /// Helper to send a key inventory request to the master.
+        /// </summary>
+        /// <param name="remoteAccessPassword">Remote access password configured on the FNE.</param>
+        /// <returns>Stream ID used for the request.</returns>
+        public uint SendMasterRadioAliasSync()
+        {
+            byte[] res = new byte[0];
+
+            uint requestStreamId = CreateStreamID();
+            SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_RADIO_ALIAS_SYNC, Constants.NET_SUBFUNC_NOP), res,
+                Constants.RtpCallEndSeq, requestStreamId, false);
+
+            return requestStreamId;
         }
 
         /// <summary>
@@ -1394,6 +1413,47 @@ namespace fnecore
                                             PingsAcked = 0;
                                             info.State = ConnectionState.WAITING_LOGIN;
                                             break;
+                                        }
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_RADIO_ALIAS_SYNC:
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        PacketBuffer packetBuffer;
+                                        lock (radioAliasSyncLock)
+                                        {
+                                            if (!radioAliasSyncPackets.TryGetValue(streamId, out packetBuffer))
+                                            {
+                                                packetBuffer = new PacketBuffer(true, "Radio Alias Sync");
+                                                radioAliasSyncPackets[streamId] = packetBuffer;
+                                            }
+                                        }
+
+                                        try
+                                        {
+                                            if (packetBuffer.Decode(message, out byte[] payload, out uint payloadLength))
+                                            {
+                                                if (payload != null && payloadLength > 0)
+                                                    FireRadioAliasSync(new RadioAliasSyncEvent(peerId, streamId, payload, payloadLength));
+
+                                                lock (radioAliasSyncLock)
+                                                {
+                                                    packetBuffer.Clear();
+                                                    radioAliasSyncPackets.Remove(streamId);
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Log(LogLevel.ERROR, $"({systemName}) RADIO_ALIAS_SYNC stream {streamId} decode failure: {ex.Message}");
+                                            lock (radioAliasSyncLock)
+                                            {
+                                                packetBuffer.Clear();
+                                                radioAliasSyncPackets.Remove(streamId);
+                                            }
                                         }
                                     }
                                 }

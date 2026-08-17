@@ -275,6 +275,8 @@ namespace fnecore
         public const byte NET_FUNC_ACK = 0x7E;                                  // Packet Acknowledge
         public const byte NET_FUNC_NAK = 0x7F;                                  // Packet Negative Acknowledge
 
+        public const byte NET_FUNC_RADIO_ALIAS_SYNC = 0x85;                     // Radio Alias Sync
+
         public const byte NET_FUNC_KEYS_INVENTORY = 0x8E;                       // Encryption Key Container Inventory
         public const byte NET_FUNC_KEYS_UPDATE = 0x8F;                          // Encryption Key Container Update
 

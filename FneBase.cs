@@ -915,6 +915,43 @@ namespace fnecore
     }
 
     /// <summary>
+    /// Event called when a radio alias sync transfer is received and reassembled.
+    /// </summary>
+    public class RadioAliasSyncEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID associated with the transfer.
+        /// </summary>
+        public uint PeerId { get; set; }
+
+        /// <summary>
+        /// Stream ID associated with the transfer.
+        /// </summary>
+        public uint StreamId { get; set; }
+
+        /// <summary>
+        /// Reassembled radio alias sync payload.
+        /// </summary>
+        public byte[] Data { get; set; }
+
+        /// <summary>
+        /// Length of the reassembled payload.
+        /// </summary>
+        public uint Length { get; set; }
+
+        /*
+        ** Methods
+        */
+        public RadioAliasSyncEvent(uint peerId, uint streamId, byte[] data, uint length) : base()
+        {
+            this.PeerId = peerId;
+            this.StreamId = streamId;
+            this.Data = data;
+            this.Length = length;
+        }
+    }
+
+    /// <summary>
     /// Event called when a key inventory transfer is received and reassembled.
     /// </summary>
     public class KeyInventoryEvent : EventArgs
@@ -1082,6 +1119,11 @@ namespace fnecore
         /// Callback action that handles when a peer disconnects.
         /// </summary>
         public Action<uint> PeerDisconnected = null;
+
+        /// <summary>
+        /// Event action thats called when a radio alias sync transfer is received.
+        /// </summary>
+        public event EventHandler<RadioAliasSyncEvent> RadioAliasSync;
 
         /// <summary>
         /// Event action thats called when a key response is received
@@ -1391,6 +1433,16 @@ namespace fnecore
         {
             if (PeerConnected != null)
                 PeerConnected.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the radio alias sync event.
+        /// </summary>
+        /// <param name="e"></param>
+        protected void FireRadioAliasSync(RadioAliasSyncEvent e)
+        {
+            if (RadioAliasSync != null)
+                RadioAliasSync.Invoke(this, e);
         }
 
         /// <summary>
