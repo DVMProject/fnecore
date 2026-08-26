@@ -1230,6 +1230,7 @@ namespace fnecore
         protected byte[] ReadFrame(UdpFrame frame, out int messageLength, out RtpHeader rtpHeader, out RtpFNEHeader fneHeader)
         {
             int length = frame.Message.Length;
+            int headerLength = (int)(Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes + Constants.RtpFNEHeaderLengthBytes);
             messageLength = -1;
             rtpHeader = null;
             fneHeader = null;
@@ -1237,10 +1238,10 @@ namespace fnecore
             // read message from socket
             if (length > 0)
             {
-                if (length < Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes)
+                if (length < headerLength)
                 {
                     Log(LogLevel.ERROR, $"Message received from network is malformed! " +
-                        $"{Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes} bytes != {frame.Message.Length} bytes");
+                        $"expected at least {headerLength} bytes, received {frame.Message.Length} bytes");
                     return null;
                 }
 
@@ -1276,10 +1277,17 @@ namespace fnecore
                 }
 
                 // copy message
+                uint availableMessageLength = (uint)(length - headerLength);
+                if (fneHeader.MessageLength > availableMessageLength)
+                {
+                    Log(LogLevel.ERROR, $"Message received from network is malformed! " +
+                        $"payload length {fneHeader.MessageLength} exceeds {availableMessageLength} available bytes");
+                    return null;
+                }
+
                 messageLength = (int)fneHeader.MessageLength;
                 byte[] message = new byte[messageLength];
-                Buffer.BlockCopy(frame.Message, (int)(Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes + Constants.RtpFNEHeaderLengthBytes), 
-                    message, 0, messageLength);
+                Buffer.BlockCopy(frame.Message, headerLength, message, 0, messageLength);
 
                 ushort calc = CRC.CreateCRC16(message, (uint)(messageLength * 8));
                 if (calc != fneHeader.CRC)
