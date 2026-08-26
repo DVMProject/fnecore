@@ -59,6 +59,8 @@ namespace fnecore
     public class FnePeer : FneBase
     {
         private const int MAX_MISSED_PEER_PINGS = 5;
+        private const int MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH = 16;
+        private const int MIN_P25_MESSAGE_LENGTH = 23;
 
         private UdpReceiver clientTraffic = null;
         private UdpReceiver clientMetadata = null;
@@ -772,6 +774,42 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to determine the DMR data type from the DMR packet flags.
+        /// </summary>
+        /// <param name="bits">DMR packet flags.</param>
+        /// <returns></returns>
+        private static DMRDataType GetDMRDataType(byte bits)
+        {
+            if ((bits & 0x20) == 0x20)
+                return (DMRDataType)(bits & 0x0F);
+
+            return DMRDataType.IDLE;
+        }
+
+        /// <summary>
+        /// Helper to validate the minimum payload length for a protocol packet.
+        /// </summary>
+        /// <param name="subFunction">Protocol sub-function.</param>
+        /// <param name="messageLength">Payload message length.</param>
+        /// <returns></returns>
+        private static bool IsProtocolPayloadLengthValid(byte subFunction, int messageLength)
+        {
+            switch (subFunction)
+            {
+                case Constants.NET_PROTOCOL_SUBFUNC_DMR:
+                case Constants.NET_PROTOCOL_SUBFUNC_NXDN:
+                case Constants.NET_PROTOCOL_SUBFUNC_ANALOG:
+                    return messageLength >= MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH;
+
+                case Constants.NET_PROTOCOL_SUBFUNC_P25:
+                    return messageLength >= MIN_P25_MESSAGE_LENGTH;
+
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
         /// Internal UDP listen traffic routine.
         /// </summary>
         private async void ListenTraffic()
@@ -837,6 +875,13 @@ namespace fnecore
                                         break;
                                     }
 
+                                    if (!IsProtocolPayloadLengthValid(fneHeader.SubFunction, message.Length))
+                                    {
+                                        Log(LogLevel.WARNING, $"({systemName}) Malformed protocol packet (from {frame.Endpoint}); " +
+                                            $"payload is too short for sub-function {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
+                                        break;
+                                    }
+
                                     if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_DMR)            // Encapsulated DMR data frame
                                     {
                                         if (peerId != this.peerId)
@@ -859,9 +904,7 @@ namespace fnecore
                                             CallType callType = ((bits & 0x40) == 0x40) ? CallType.PRIVATE : CallType.GROUP;
                                             FrameType frameType = (FrameType)((bits & 0x30) >> 4);
 
-                                            DMRDataType dataType = DMRDataType.IDLE;
-                                            if ((bits & 0x20) == 0x20)
-                                                dataType = (DMRDataType)(bits & ~(0x20));
+                                            DMRDataType dataType = GetDMRDataType(bits);
 
                                             byte n = (byte)(bits & 0xF);
 #if DEBUG
