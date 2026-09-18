@@ -96,7 +96,14 @@ namespace fnecore
         private readonly Dictionary<uint, PacketBuffer> keyInventoryPackets = new Dictionary<uint, PacketBuffer>();
 
         private readonly object radioAliasSyncLock = new object();
-        private readonly Dictionary<uint, PacketBuffer> radioAliasSyncPackets = new Dictionary<uint, PacketBuffer>();
+        private readonly Dictionary<uint, RadioAliasTransfer> radioAliasSyncPackets = new Dictionary<uint, RadioAliasTransfer>();
+        private readonly Queue<uint> recentRadioAliasStreams = new Queue<uint>();
+
+        private sealed class RadioAliasTransfer
+        {
+            public readonly PacketBuffer Buffer = new PacketBuffer(true, "Radio Alias Sync");
+            public byte? LastBlock;
+        }
 
         /*
         ** Properties
@@ -204,6 +211,7 @@ namespace fnecore
             {
                 byte[] parsedPresharedKey = FneUtils.ConvertHexStringToPresharedKey(presharedKey);
                 clientTraffic.SetPresharedKey(parsedPresharedKey);
+                clientMetadata.SetPresharedKey(parsedPresharedKey);
             }
 
             info = new PeerInformation();
@@ -316,6 +324,7 @@ namespace fnecore
                 throw new InvalidOperationException("Cannot stop listening when not started.");
 
             Logger(LogLevel.INFO, $"({systemName}) stopping network services, {masterEndpoint}");
+            ClearRadioAliasSyncRequests();
 
             // send shutdown opcode to server
             SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
@@ -528,19 +537,144 @@ namespace fnecore
         }
 
         /// <summary>
-        /// Helper to send a key inventory request to the master.
+        /// Helper to request the master's radio alias list.
         /// </summary>
-        /// <param name="remoteAccessPassword">Remote access password configured on the FNE.</param>
         /// <returns>Stream ID used for the request.</returns>
         public uint SendMasterRadioAliasSync()
         {
-            byte[] res = new byte[0];
+            uint requestStreamId;
+            lock (radioAliasSyncLock)
+            {
+                if (!isStarted || info.State != ConnectionState.RUNNING)
+                    throw new InvalidOperationException("The peer must be connected before requesting radio aliases.");
+                do { requestStreamId = CreateStreamID(); }
+                while (requestStreamId == 0 || radioAliasSyncPackets.ContainsKey(requestStreamId) || recentRadioAliasStreams.Contains(requestStreamId));
+                radioAliasSyncPackets[requestStreamId] = new RadioAliasTransfer();
+                // Remember a bounded set of requests so a late NAK after cancellation cannot reset the peer.
+                recentRadioAliasStreams.Enqueue(requestStreamId);
+                if (recentRadioAliasStreams.Count > 32)
+                    recentRadioAliasStreams.Dequeue();
+            }
 
-            uint requestStreamId = CreateStreamID();
-            SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_RADIO_ALIAS_SYNC, Constants.NET_SUBFUNC_NOP), res,
-                Constants.RtpCallEndSeq, requestStreamId, false);
-
+            try
+            {
+                // The FNE frame reader rejects empty payloads, even for request-only opcodes.
+                SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_RADIO_ALIAS_SYNC, Constants.NET_SUBFUNC_NOP), new byte[1],
+                    Constants.RtpCallEndSeq, requestStreamId, false);
+            }
+            catch
+            {
+                CancelRadioAliasSync(requestStreamId);
+                throw;
+            }
             return requestStreamId;
+        }
+
+        /// <summary>
+        /// Releases an alias request after caller cancellation or timeout; late fragments are ignored.
+        /// </summary>
+        /// <param name="requestStreamId">Stream ID returned by SendMasterRadioAliasSync.</param>
+        public void CancelRadioAliasSync(uint requestStreamId)
+        {
+            lock (radioAliasSyncLock)
+            {
+                if (radioAliasSyncPackets.Remove(requestStreamId, out RadioAliasTransfer transfer))
+                    transfer.Buffer.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Releases incomplete transfers when the peer connection ends.
+        /// </summary>
+        private void ClearRadioAliasSyncRequests()
+        {
+            uint[] requests;
+            lock (radioAliasSyncLock)
+            {
+                requests = radioAliasSyncPackets.Keys.ToArray();
+                foreach (RadioAliasTransfer transfer in radioAliasSyncPackets.Values)
+                    transfer.Buffer.Clear();
+                radioAliasSyncPackets.Clear();
+            }
+            foreach (uint request in requests)
+                FireRadioAliasSyncFailed(new RadioAliasSyncFailedEvent(peerId, request,
+                    new IOException("Peer disconnected during radio alias sync.")));
+        }
+
+        /// <summary>
+        /// Processes alias replies without changing the active voice stream or packet sequence.
+        /// </summary>
+        private bool HandleRadioAliasSyncFrame(uint targetPeerId, uint responseStreamId, byte function, byte[] message)
+        {
+            if (function != Constants.NET_FUNC_RADIO_ALIAS_SYNC && function != Constants.NET_FUNC_NAK)
+                return false;
+
+            RadioAliasSyncEvent completed = null;
+            RadioAliasSyncFailedEvent failed = null;
+            lock (radioAliasSyncLock)
+            {
+                if (targetPeerId != peerId)
+                    return function == Constants.NET_FUNC_RADIO_ALIAS_SYNC;
+
+                // Explicit connection/ACL resets still belong to the normal peer state machine.
+                ConnectionMSTNAK reason = message.Length >= 12 ? (ConnectionMSTNAK)FneUtils.ToUInt16(message, 10) : ConnectionMSTNAK.INVALID;
+                if (function == Constants.NET_FUNC_NAK && (reason == ConnectionMSTNAK.PEER_RESET || reason == ConnectionMSTNAK.PEER_ACL))
+                    return false;
+                if (!radioAliasSyncPackets.TryGetValue(responseStreamId, out RadioAliasTransfer transfer))
+                    return function == Constants.NET_FUNC_RADIO_ALIAS_SYNC || recentRadioAliasStreams.Contains(responseStreamId);
+
+                if (function == Constants.NET_FUNC_NAK)
+                {
+                    failed = new RadioAliasSyncFailedEvent(peerId, responseStreamId,
+                        new IOException("The FNE rejected the radio alias request."));
+                }
+                else
+                {
+                    try
+                    {
+                        if (message.Length != PacketBuffer.FRAG_SIZE || message[8] > message[9])
+                            throw new InvalidDataException("Invalid radio alias fragment.");
+                        if (transfer.LastBlock.HasValue && transfer.LastBlock != message[9])
+                            throw new InvalidDataException("Radio alias fragment count changed during transfer.");
+                        transfer.LastBlock = message[9];
+                        if (message[8] == 0)
+                        {
+                            uint size = FneUtils.ToUInt32(message, 0);
+                            uint compressed = FneUtils.ToUInt32(message, 4);
+                            if (size == 0 || size > 8 * 1024 * 1024 || compressed == 0 ||
+                                compressed > (message[9] + 1) * PacketBuffer.FRAG_BLOCK_SIZE ||
+                                compressed <= message[9] * PacketBuffer.FRAG_BLOCK_SIZE)
+                                throw new InvalidDataException("Invalid radio alias transfer length.");
+                        }
+
+                        if (transfer.Buffer.Decode(message, out byte[] payload, out uint length))
+                            completed = new RadioAliasSyncEvent(peerId, responseStreamId, payload, length);
+                        else if (transfer.Buffer.Fragments.Count == 0)
+                            throw new InvalidDataException("Radio alias reassembly failed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        failed = new RadioAliasSyncFailedEvent(peerId, responseStreamId,
+                            ex as InvalidDataException ?? new InvalidDataException("Invalid radio alias transfer.", ex));
+                    }
+                }
+
+                if (completed != null || failed != null)
+                {
+                    transfer.Buffer.Clear();
+                    radioAliasSyncPackets.Remove(responseStreamId);
+                }
+            }
+
+            // Application callbacks run outside the transfer lock.
+            if (completed != null)
+                FireRadioAliasSync(completed);
+            if (failed != null)
+            {
+                Log(LogLevel.WARNING, $"({systemName}) RADIO_ALIAS_SYNC stream {responseStreamId}: {failed.Error.Message}");
+                FireRadioAliasSyncFailed(failed);
+            }
+            return true;
         }
 
         /// <summary>
@@ -753,6 +887,7 @@ namespace fnecore
         /// </summary>
         private void RotateMasterEndpont()
         {
+            ClearRadioAliasSyncRequests();
             // are we rotating IPs for HA reconnect?
             if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
             {
@@ -849,6 +984,9 @@ namespace fnecore
                     if (frame.Endpoint.ToString() == masterEndpoint.ToString())
                     {
                         uint peerId = fneHeader.PeerID;
+
+                        if (HandleRadioAliasSyncFrame(peerId, fneHeader.StreamID, fneHeader.Function, message))
+                            continue;
 
                         if (streamId != fneHeader.StreamID)
                             pktSeq(true);
@@ -1123,6 +1261,7 @@ namespace fnecore
                                     {
                                         info.State = ConnectionState.WAITING_LOGIN;
                                         Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTCL received");
+                                        ClearRadioAliasSyncRequests();
 
                                         // userland actions
                                         if (PeerDisconnected != null)
@@ -1446,6 +1585,7 @@ namespace fnecore
                                             PingsSent = 0;
                                             PingsAcked = 0;
                                             info.State = ConnectionState.WAITING_LOGIN;
+                                            ClearRadioAliasSyncRequests();
                                         }
                                         else
                                         {
@@ -1455,48 +1595,8 @@ namespace fnecore
                                             PingsSent = 0;
                                             PingsAcked = 0;
                                             info.State = ConnectionState.WAITING_LOGIN;
+                                            ClearRadioAliasSyncRequests();
                                             break;
-                                        }
-                                    }
-                                }
-                                break;
-
-                            case Constants.NET_FUNC_RADIO_ALIAS_SYNC:
-                                {
-                                    if (this.peerId == peerId)
-                                    {
-                                        PacketBuffer packetBuffer;
-                                        lock (radioAliasSyncLock)
-                                        {
-                                            if (!radioAliasSyncPackets.TryGetValue(streamId, out packetBuffer))
-                                            {
-                                                packetBuffer = new PacketBuffer(true, "Radio Alias Sync");
-                                                radioAliasSyncPackets[streamId] = packetBuffer;
-                                            }
-                                        }
-
-                                        try
-                                        {
-                                            if (packetBuffer.Decode(message, out byte[] payload, out uint payloadLength))
-                                            {
-                                                if (payload != null && payloadLength > 0)
-                                                    FireRadioAliasSync(new RadioAliasSyncEvent(peerId, streamId, payload, payloadLength));
-
-                                                lock (radioAliasSyncLock)
-                                                {
-                                                    packetBuffer.Clear();
-                                                    radioAliasSyncPackets.Remove(streamId);
-                                                }
-                                            }
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            Log(LogLevel.ERROR, $"({systemName}) RADIO_ALIAS_SYNC stream {streamId} decode failure: {ex.Message}");
-                                            lock (radioAliasSyncLock)
-                                            {
-                                                packetBuffer.Clear();
-                                                radioAliasSyncPackets.Remove(streamId);
-                                            }
                                         }
                                     }
                                 }
@@ -1598,6 +1698,9 @@ namespace fnecore
                     if (frame.Endpoint.ToString() == metadataEndpoint.ToString())
                     {
                         uint peerId = fneHeader.PeerID;
+
+                        if (HandleRadioAliasSyncFrame(peerId, fneHeader.StreamID, fneHeader.Function, message))
+                            continue;
 
                         if (streamId != fneHeader.StreamID)
                             pktSeq(true);
@@ -1710,6 +1813,7 @@ namespace fnecore
                     // if we're not connected, zero out the connection stats and send a login request to the master
                     if (info.State == ConnectionState.WAITING_LOGIN)
                     {
+                        ClearRadioAliasSyncRequests();
                         // reset states
                         PingsSent = 0;
                         PingsAcked = 0;

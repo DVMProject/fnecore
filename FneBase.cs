@@ -952,6 +952,23 @@ namespace fnecore
     }
 
     /// <summary>
+    /// Event called when a requested radio alias transfer fails.
+    /// </summary>
+    public class RadioAliasSyncFailedEvent : EventArgs
+    {
+        public uint PeerId { get; }
+        public uint StreamId { get; }
+        public Exception Error { get; }
+
+        public RadioAliasSyncFailedEvent(uint peerId, uint streamId, Exception error)
+        {
+            PeerId = peerId;
+            StreamId = streamId;
+            Error = error;
+        }
+    }
+
+    /// <summary>
     /// Event called when a key inventory transfer is received and reassembled.
     /// </summary>
     public class KeyInventoryEvent : EventArgs
@@ -1124,6 +1141,11 @@ namespace fnecore
         /// Event action thats called when a radio alias sync transfer is received.
         /// </summary>
         public event EventHandler<RadioAliasSyncEvent> RadioAliasSync;
+
+        /// <summary>
+        /// Event action called when an alias request is rejected, malformed, or disconnected.
+        /// </summary>
+        public event EventHandler<RadioAliasSyncFailedEvent> RadioAliasSyncFailed;
 
         /// <summary>
         /// Event action thats called when a key response is received
@@ -1451,6 +1473,14 @@ namespace fnecore
         {
             if (RadioAliasSync != null)
                 RadioAliasSync.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the radio alias failure event.
+        /// </summary>
+        protected void FireRadioAliasSyncFailed(RadioAliasSyncFailedEvent e)
+        {
+            RadioAliasSyncFailed?.Invoke(this, e);
         }
 
         /// <summary>

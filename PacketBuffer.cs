@@ -206,7 +206,7 @@ namespace fnecore
 
                 if (compression)
                 {
-                    byte[] decompressed = Decompress(compressed);
+                    byte[] decompressed = Decompress(compressed, len);
 
                     // Match C++ behavior: only succeed when decompressed size equals header size.
                     if (decompressed.Length == len)
@@ -348,12 +348,19 @@ namespace fnecore
         /// </summary>
         /// <param name="input"></param>
         /// <returns></returns>
-        private static byte[] Decompress(ReadOnlySpan<byte> input)
+        private static byte[] Decompress(ReadOnlySpan<byte> input, uint expectedLength)
         {
             using var source = new MemoryStream(input.ToArray());
             using var z = new InflaterInputStream(source, new Inflater(noHeader: false));
             using var output = new MemoryStream();
-            z.CopyTo(output);
+            byte[] chunk = new byte[8192];
+            int count;
+            while ((count = z.Read(chunk, 0, chunk.Length)) > 0)
+            {
+                if (output.Length + count > expectedLength)
+                    throw new InvalidDataException("Decompressed packet exceeds its declared size.");
+                output.Write(chunk, 0, count);
+            }
             return output.ToArray();
         }
 
