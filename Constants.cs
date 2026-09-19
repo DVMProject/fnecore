@@ -232,7 +232,7 @@ namespace fnecore
         public const uint P25TSDUPacketLength = 69U;        // 24 byte header + TSDU data
         public const uint P25TDULCPacketLength = 78U;       // 24 byte header + TDULC data
         public const uint NXDNPacketLength = 70U;           // 20 byte header + NXDN_FRAME_LENGTH_BYTES + 2 byte trailer
-        public const uint AnalogPacketLength = 324U;        // 20 byte header + AUDIO_SAMPLES_LENGTH_BYTES + 4 byte trailer
+        public const uint AnalogPacketLength = 344U;        // 20 byte header + AUDIO_SAMPLES_LENGTH_BYTES + 4 byte trailer
 
         public const uint HAParamsEntryLen = 20;
 
@@ -248,7 +248,7 @@ namespace fnecore
         public const byte NET_PROTOCOL_SUBFUNC_DMR = 0x00;                      // DMR
         public const byte NET_PROTOCOL_SUBFUNC_P25 = 0x01;                      // P25
         public const byte NET_PROTOCOL_SUBFUNC_NXDN = 0x02;                     // NXDN
-        public const byte NET_PROTOCOL_SUBFUNC_ANALOG = 0x03;                   // Analog
+        public const byte NET_PROTOCOL_SUBFUNC_ANALOG = 0x0F;                   // Analog
 
         public const byte NET_FUNC_MASTER = 0x01;                               // Network Master Function
         public const byte NET_MASTER_SUBFUNC_WL_RID = 0x00;                     // Whitelist RIDs
