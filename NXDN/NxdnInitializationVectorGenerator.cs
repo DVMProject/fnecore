@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/**
+* Digital Voice Modem - Desktop Dispatch Console
+* AGPLv3 Open Source. Use is subject to license terms.
+* DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
+*
+*   Copyright (C) 2026 C. Lovell, Dev_Ranger
+*
+* NXDN protocol helpers adapted from DvmConsole.Media in dvmconsole-neo
+* (https://github.com/RdWing/dvmconsole), licensed AGPL-3.0-only.
+*/
+#nullable enable
+using System;
+
+namespace fnecore.NXDN
+{
+    // Implements the 64-stage NXDN IV generator shared by DES and AES. VCALL_IV
+    // carries the current 64-bit LFSR state; advancing it by 64 shifts produces
+    // the seed for the next eight-frame encryption session.
+    internal static class NxdnInitializationVectorGenerator
+    {
+        public static byte[] GetNextSeed(ReadOnlySpan<byte> seed)
+        {
+            ulong state = ReadSeed(seed);
+            for (int index = 0; index < 64; index++)
+            {
+                ulong feedback = ((state >> 63) ^
+                    (state >> 61) ^
+                    (state >> 45) ^
+                    (state >> 37) ^
+                    (state >> 26) ^
+                    (state >> 14)) & 1;
+                state = (state << 1) | feedback;
+            }
+            return WriteSeed(state);
+        }
+
+        public static byte[] CreateAesInitializationVector(ReadOnlySpan<byte> seed)
+        {
+            if (seed.Length != NxdnPrivacyAlgorithms.MessageIndicatorBytes)
+                throw new ArgumentException("NXDN AES requires an 8-byte IV seed.", nameof(seed));
+
+            byte[] initializationVector = new byte[16];
+            seed.CopyTo(initializationVector);
+            GetNextSeed(seed).CopyTo(initializationVector, seed.Length);
+            return initializationVector;
+        }
+
+        private static ulong ReadSeed(ReadOnlySpan<byte> seed)
+        {
+            if (seed.Length != NxdnPrivacyAlgorithms.MessageIndicatorBytes)
+                throw new ArgumentException("NXDN IV generation requires an 8-byte seed.", nameof(seed));
+
+            ulong state = 0;
+            foreach (byte value in seed)
+                state = (state << 8) | value;
+            return state;
+        }
+
+        private static byte[] WriteSeed(ulong state)
+        {
+            byte[] seed = new byte[NxdnPrivacyAlgorithms.MessageIndicatorBytes];
+            for (int index = seed.Length - 1; index >= 0; index--)
+            {
+                seed[index] = (byte)state;
+                state >>= 8;
+            }
+            return seed;
+        }
+    }
+}

@@ -1359,6 +1359,9 @@ namespace fnecore
                                                     int keyLength = 32;
                                                     switch (modifyKey.KeysetItem.AlgId)
                                                     {
+                                                        case NXDN.NxdnPrivacyAlgorithms.Ehr:
+                                                            keyLength = NXDN.NxdnPrivacyAlgorithms.KeyBytes(NXDN.NxdnPrivacyAlgorithms.Ehr);
+                                                            break;
                                                         case P25Defines.P25_ALGO_DES:
                                                             keyLength = 8;
                                                             break;
@@ -1374,11 +1377,27 @@ namespace fnecore
 
                                                     if (modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_DES &&
                                                         modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_ARC4 &&
+                                                        modifyKey.KeysetItem.AlgId != NXDN.NxdnPrivacyAlgorithms.Ehr &&
                                                         modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_AES)
                                                         Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId}, unknown algorithm ID ${modifyKey.KeysetItem.AlgId:X2}, unable to determine key length");
 
-                                                    firstKey.SetKey(decryptedKey.Take(keyLength).ToArray(), (uint)keyLength);
-                                                    modifyKey.KeysetItem.KeyLength = (byte)keyLength;
+                                                    try
+                                                    {
+                                                        // EHR occupies two bytes in the peer-encrypted 32-byte block.
+                                                        // Reject malformed padding instead of silently truncating it.
+                                                        if (modifyKey.KeysetItem.AlgId == NXDN.NxdnPrivacyAlgorithms.Ehr &&
+                                                            (decryptedKey.Length != 32 || decryptedKey.Skip(keyLength).Any(value => value != 0)))
+                                                        {
+                                                            Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId}, invalid NXDN EHR key padding; ignoring key response");
+                                                            break;
+                                                        }
+                                                        firstKey.SetKey(decryptedKey.Take(keyLength).ToArray(), (uint)keyLength);
+                                                        modifyKey.KeysetItem.KeyLength = (byte)keyLength;
+                                                    }
+                                                    finally
+                                                    {
+                                                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(decryptedKey);
+                                                    }
                                                 }
                                                 else
                                                 {
