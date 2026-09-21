@@ -6,8 +6,8 @@
 *
 *   Copyright (C) 2026 C. Lovell, Dev_Ranger
 *
-* NXDN protocol helpers adapted from DvmConsole.Media in dvmconsole-neo
-* (https://github.com/RdWing/dvmconsole), licensed AGPL-3.0-only.
+* Portions of this NXDN implementation draw on DvmConsole.Media
+* (https://github.com/RdWing/dvmconsole), AGPL-3.0-only.
 */
 #nullable enable
 using System;
