@@ -1,5 +1,9 @@
+// SPDX-FileCopyrightText: 2026 RdWing
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 C. Lovell, Dev_Ranger
+// Receive sequencing and privacy handling includes portions adapted from
+// src/DvmConsole.Media/NxdnRxAudioSession.cs
+// in DVM Console NEO (https://github.com/RdWing/dvmconsole), AGPL-3.0-only.
 using System;
 using System.Linq;
 using System.Security.Cryptography;

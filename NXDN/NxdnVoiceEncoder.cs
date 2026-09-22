@@ -1,5 +1,10 @@
+// SPDX-FileCopyrightText: 2026 RdWing
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 C. Lovell, Dev_Ranger
+// Voice aggregation and signaling includes portions adapted from
+// src/DvmConsole.Media/NxdnTxAudioSession.cs,
+// src/DvmConsole.Media/NxdnTxCallSession.cs
+// in DVM Console NEO (https://github.com/RdWing/dvmconsole), AGPL-3.0-only.
 using System;
 
 namespace fnecore.NXDN
