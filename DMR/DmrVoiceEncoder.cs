@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 RdWing
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
 * Digital Voice Modem - Fixed Network Equipment Core Library
@@ -5,6 +6,11 @@
 * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
 *
 *   Copyright (C) 2026 C. Lovell, Dev_Ranger
+
+* Voice framing, privacy sequencing and call completion includes portions adapted from
+* src/DvmConsole.Media/DmrTxAudioSession.cs,
+* src/DvmConsole.Media/DmrTxCallSession.cs
+* in DVM Console NEO (https://github.com/RdWing/dvmconsole), AGPL-3.0-only.
 */
 using System;
 using System.Collections.Generic;

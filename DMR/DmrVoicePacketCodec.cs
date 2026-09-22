@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 RdWing
 // SPDX-License-Identifier: AGPL-3.0-only
 /**
 * Digital Voice Modem - Fixed Network Equipment Core Library
@@ -6,8 +7,8 @@
 *
 *   Copyright (C) 2026 C. Lovell, Dev_Ranger
 *
-* Portions of this DMR implementation draw on DvmConsole.Media
-* (https://github.com/RdWing/dvmconsole), AGPL-3.0-only.
+* Adapted from src/DvmConsole.Media/DmrVoicePacketCodec.cs
+* in DVM Console NEO (https://github.com/RdWing/dvmconsole), AGPL-3.0-only.
 */
 using System;
 
