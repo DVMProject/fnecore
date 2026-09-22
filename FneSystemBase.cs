@@ -224,6 +224,8 @@ namespace fnecore
             this.fne.NXDNDataValidate = NXDNDataValidate;
             this.fne.NXDNDataReceived += NXDNDataReceived;
 
+            this.fne.AnalogDataReceived += AnalogDataReceived;
+
             this.fne.PeerIgnored = PeerIgnored;
             this.fne.PeerConnected += PeerConnected;
 
@@ -321,6 +323,9 @@ namespace fnecore
         /// <param name="sender"></param>
         /// <param name="e"></param>
         protected abstract void NXDNDataReceived(object sender, NXDNDataReceivedEvent e);
+
+        /// <summary>Event handler for received analog group voice.</summary>
+        protected virtual void AnalogDataReceived(object sender, AnalogDataReceivedEvent e) { }
 
         /// <summary>
         /// Callback used to process whether or not a peer is being ignored for traffic.
