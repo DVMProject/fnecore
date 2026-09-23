@@ -143,7 +143,7 @@ namespace fnecore
     /// <summary>
     /// Implements a FNE system.
     /// </summary>
-    public abstract class FneSystemBase
+    public abstract partial class FneSystemBase
     {
         protected FnePeer fne;
 

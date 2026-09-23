@@ -25,7 +25,7 @@ namespace fnecore.NXDN
         /// </summary>
         MESSAGE_TYPE_VCALL = 0x01,
         /// <summary>
-        /// Voice Call - Individual
+        /// Voice Call - Initialization Vector
         /// </summary>
         MESSAGE_TYPE_VCALL_IV = 0x03,
         /// <summary>
