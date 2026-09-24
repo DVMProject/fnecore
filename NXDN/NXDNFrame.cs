@@ -23,8 +23,8 @@ namespace fnecore.NXDN
         public const int CodewordBytes = 9;
         public const int VoiceBytes = 36;
         public const int HeaderBytes = 24;
-        public const int FrameOffset = HeaderBytes + 2;
-        public const int PacketBytes = FrameOffset + FrameBytes + 4;
+        public const int FrameOffset = HeaderBytes;
+        public const int PacketBytes = FrameOffset + FrameBytes + 2 + 8;
 
         /// <summary>Writes the same transport envelope used by DVMHost.</summary>
         public static void CreateMessageHeader(NXDNMessageType type, NXDNCallData call, Span<byte> packet)
@@ -39,13 +39,13 @@ namespace fnecore.NXDN
             packet[6] = (byte)(call.SrcId >> 8); packet[7] = (byte)call.SrcId;
             packet[9] = (byte)(call.DstId >> 8); packet[10] = (byte)call.DstId;
             packet[15] = (byte)(call.Group ? 0 : 0x40);
-            packet[23] = FrameOffset + FrameBytes;
+            packet[23] = FrameBytes;
         }
 
         private static bool Sync(ReadOnlySpan<byte> frame) => frame.Length >= FrameBytes &&
             frame[0] == 0xCD && frame[1] == 0xF5 && (frame[2] & 0xF0) == 0x90;
 
-        /// <summary>Accepts Host modem-tagged payloads and earlier untagged client frames.</summary>
+        /// <summary>Accepts current RF payloads and older modem-tagged network frames.</summary>
         public static bool TryExtractFrame(ReadOnlySpan<byte> packet, Span<byte> frame)
         {
             if (frame.Length < FrameBytes || packet.Length < HeaderBytes + FrameBytes ||
@@ -100,8 +100,7 @@ namespace fnecore.NXDN
         {
             byte[] packet = new byte[PacketBytes];
             CreateMessageHeader(type, call, packet);
-            // Host reads two modem bytes before the 48-byte RF frame.
-            packet[HeaderBytes] = type == NXDNMessageType.MESSAGE_TYPE_TX_REL ? (byte)0x03 : (byte)0x01;
+            // Modem tags stay local to Host; the network carries RF bytes and zero padding.
             return packet;
         }
 
