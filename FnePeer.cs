@@ -56,7 +56,7 @@ namespace fnecore
     /// <summary>
     /// Implements an FNE "peer".
     /// </summary>
-    public class FnePeer : FneBase
+    public partial class FnePeer : FneBase
     {
         private const int MAX_MISSED_PEER_PINGS = 5;
         private const int MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH = 16;
@@ -1776,6 +1776,22 @@ namespace fnecore
                                         }
                                     }
                                 }
+                                break;
+
+                            case Constants.NET_FUNC_TRANSFER:
+                                if (fneHeader.SubFunction == Constants.NET_TRANSFER_SUBFUNC_PATCH_STATUS)
+                                {
+                                    HandlePatchStatusMessage(message);
+                                    break;
+                                }
+
+                                if (UserPacketHandler != null)
+                                {
+                                    UserPacketHandler(frame, peerId, streamId, rtpHeader, fneHeader, message);
+                                    break;
+                                }
+
+                                Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
                                 break;
 
                             default:
