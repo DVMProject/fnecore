@@ -405,6 +405,10 @@ namespace fnecore
                             {
                                 foreach (JsonElement tgPatch in entry.Value.EnumerateArray())
                                 {
+                                    // a malformed entry invalidates the whole payload rather than throwing
+                                    if (tgPatch.ValueKind != JsonValueKind.Object)
+                                        return null;
+
                                     PatchStatusPatch parsed = ReadPatch(tgPatch);
 
                                     // byTalkgroup entries carry a single "member" object rather than a members array
@@ -422,7 +426,7 @@ namespace fnecore
                     return snapshot;
                 }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException || ex is InvalidOperationException)
             {
                 return null;
             }
