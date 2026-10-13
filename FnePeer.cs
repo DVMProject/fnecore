@@ -102,7 +102,7 @@ namespace fnecore
         private sealed class RadioAliasTransfer
         {
             public readonly PacketBuffer Buffer = new PacketBuffer(true, "Radio Alias Sync");
-            public byte? LastBlock;
+            public ushort? LastBlock;
         }
 
         /*
@@ -632,21 +632,25 @@ namespace fnecore
                 {
                     try
                     {
-                        if (message.Length != PacketBuffer.FRAG_SIZE || message[8] > message[9])
+                        if (message.Length != PacketBuffer.FRAG_SIZE)
                             throw new InvalidDataException("Invalid radio alias fragment.");
-                        if (transfer.LastBlock.HasValue && transfer.LastBlock != message[9])
-                            throw new InvalidDataException("Radio alias fragment count changed during transfer.");
-                        transfer.LastBlock = message[9];
-                        if (message[8] == 0)
-                        {
-                            uint size = FneUtils.ToUInt32(message, 0);
-                            uint compressed = FneUtils.ToUInt32(message, 4);
-                            if (size == 0 || size > 8 * 1024 * 1024 || compressed == 0 ||
-                                compressed > (message[9] + 1) * PacketBuffer.FRAG_BLOCK_SIZE ||
-                                compressed <= message[9] * PacketBuffer.FRAG_BLOCK_SIZE)
-                                throw new InvalidDataException("Invalid radio alias transfer length.");
-                        }
 
+                        uint size = FneUtils.ToUInt32(message, 0);
+                        uint compressed = FneUtils.ToUInt32(message, 4);
+                        bool extended = compressed > 256U * PacketBuffer.FRAG_BLOCK_SIZE;
+                        ushort block = extended ? FneUtils.ToUInt16(message, 8) : message[8];
+                        ushort lastBlock = extended ? FneUtils.ToUInt16(message, 10) : message[9];
+                        uint blockSize = (uint)(extended ? PacketBuffer.EXTENDED_FRAG_BLOCK_SIZE : PacketBuffer.FRAG_BLOCK_SIZE);
+                        uint blockCount = (uint)lastBlock + 1U;
+
+                        bool hasSizeMetadata = extended || block == 0;
+                        if (block > lastBlock || (!extended && block != 0 && (size != 0 || compressed != 0)) ||
+                            (hasSizeMetadata && (size == 0 || compressed == 0 || size > 8U * 1024U * 1024U || compressed > 8U * 1024U * 1024U ||
+                            compressed > blockCount * blockSize || compressed <= (blockCount - 1U) * blockSize)))
+                            throw new InvalidDataException("Invalid radio alias fragment.");
+                        if (transfer.LastBlock.HasValue && transfer.LastBlock != lastBlock)
+                            throw new InvalidDataException("Radio alias fragment count changed during transfer.");
+                        transfer.LastBlock = lastBlock;
                         if (transfer.Buffer.Decode(message, out byte[] payload, out uint length))
                             completed = new RadioAliasSyncEvent(peerId, responseStreamId, payload, length);
                         else if (transfer.Buffer.Fragments.Count == 0)
