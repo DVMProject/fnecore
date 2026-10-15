@@ -160,6 +160,14 @@ namespace fnecore
             if (data.Length < headerSize)
                 return false;
 
+            // Native PacketBuffer fragments always contain a complete fixed-size payload block.
+            // Reject truncated input rather than treating absent payload bytes as zeroes.
+            if (data.Length < FRAG_SIZE)
+            {
+                Clear();
+                return false;
+            }
+
             ushort curBlock = extended ? ReadUInt16BE(data, 8) : data[8];
             ushort lastBlock = extended ? ReadUInt16BE(data, 10) : data[9];
             uint blockCount = (uint)lastBlock + 1U;
@@ -201,7 +209,10 @@ namespace fnecore
                 if (size == 0 || compressedSize == 0 || size > MAX_FRAGMENT_SIZE ||
                     compressedSize > MAX_FRAGMENT_SIZE || (!extended && compressedSize > MAX_256_COMPRESSED_SIZE) ||
                     DivideRoundUp(compressedSize, (uint)blockSize) != blockCount)
+                {
+                    Clear();
                     return false;
+                }
 
                 frag.Size = size;
                 frag.CompressedSize = compressedSize;
@@ -214,9 +225,7 @@ namespace fnecore
 
             frag.Data = new byte[blockSize];
 
-            int payloadBytes = Math.Min(blockSize, Math.Max(0, data.Length - headerSize));
-            if (payloadBytes > 0)
-                data.Slice(headerSize, payloadBytes).CopyTo(frag.Data);
+            data.Slice(headerSize, blockSize).CopyTo(frag.Data);
 
             lock (sync)
             {
@@ -230,6 +239,15 @@ namespace fnecore
                     }
 
                     break;
+                }
+
+                // Non-zero blocks may arrive before block zero. Do not accept block zero if its
+                // metadata would leave more buffered fragments than the declared assembly permits.
+                if (curBlock == 0 &&
+                    (uint)fragments.Count >= DivideRoundUp(compressedSize, (uint)blockSize))
+                {
+                    ClearLocked();
+                    return false;
                 }
 
                 // Match the native implementation: ignore duplicate blocks without replacing data.
@@ -290,7 +308,18 @@ namespace fnecore
 
                 if (compression)
                 {
-                    byte[] decompressed = Decompress(compressed, len);
+                    byte[] decompressed;
+                    try
+                    {
+                        decompressed = Decompress(compressed, len);
+                    }
+                    catch (Exception ex) when (ex is InvalidDataException ||
+                                               ex is IOException ||
+                                               ex is ICSharpCode.SharpZipLib.SharpZipBaseException)
+                    {
+                        ClearLocked();
+                        return false;
+                    }
 
                     // Match C++ behavior: only succeed when decompressed size equals header size.
                     if (decompressed.Length == len)
@@ -305,7 +334,7 @@ namespace fnecore
                     return false;
                 }
 
-                if (compressed.Length < len)
+                if (compressedLen != len)
                 {
                     ClearLocked();
                     return false;
