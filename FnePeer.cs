@@ -326,8 +326,15 @@ namespace fnecore
             Logger(LogLevel.INFO, $"({systemName}) stopping network services, {masterEndpoint}");
             ClearRadioAliasSyncRequests();
 
-            // send shutdown opcode to server
-            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            // send shutdown opcode to server (best effort, the network may already be gone)
+            try
+            {
+                SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            }
+            catch (Exception ex) when (ex is SocketException || ex is InvalidOperationException)
+            {
+                Log(LogLevel.WARNING, $"({systemName}) failed to send closing to {masterEndpoint}; {ex.Message}");
+            }
 
             // stop UDP listen traffic task
             if (listenTrafficTask != null)
@@ -377,6 +384,12 @@ namespace fnecore
                     maintainenceCancelToken.Dispose();
                 }
             }
+
+            // close the sockets; the listen routines may be waiting on a receive that never
+            // completes if the network is gone
+            abortListening = true;
+            clientTraffic.Close();
+            clientMetadata.Close();
 
             isStarted = false;
         }
@@ -884,6 +897,30 @@ namespace fnecore
                 currPktSeq = 0;
 
             return curr;
+        }
+
+        /// <summary>
+        /// Helper to reconnect a UDP socket from within a listen or maintainence routine.
+        /// </summary>
+        /// <remarks>The listen and maintainence routines are async void, an exception thrown here would
+        /// terminate the process; failures are logged and the next pass retries instead.</remarks>
+        /// <param name="client">UDP socket to reconnect</param>
+        /// <param name="endpoint">Endpoint to reconnect to</param>
+        private void TryReconnect(UdpReceiver client, IPEndPoint endpoint)
+        {
+            // stopping; the socket was closed on purpose
+            if (abortListening)
+                return;
+
+            try
+            {
+                client.Connect(endpoint);
+            }
+            catch (SocketException se)
+            {
+                Log(LogLevel.ERROR, $"({systemName}) failed to reconnect to {endpoint}; {se.SocketErrorCode}; {se.Message}");
+            }
+            catch (ObjectDisposedException) { /* stub */ }
         }
 
         /// <summary>
@@ -1648,7 +1685,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    clientTraffic.Connect(masterEndpoint);
+                    TryReconnect(clientTraffic, masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1667,7 +1704,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            clientTraffic.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
@@ -1814,7 +1851,7 @@ namespace fnecore
                 catch (InvalidOperationException)
                 {
                     Log(LogLevel.WARNING, $"({systemName}) Metadata receiver entered invalid state; reconnecting metadata socket to {metadataEndpoint}");
-                    clientMetadata.Connect(metadataEndpoint);
+                    TryReconnect(clientMetadata, metadataEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1826,7 +1863,7 @@ namespace fnecore
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
                             Log(LogLevel.WARNING, $"({systemName}) Metadata socket error {se.SocketErrorCode}; reconnecting metadata socket to {metadataEndpoint}");
-                            clientMetadata.Connect(metadataEndpoint);
+                            TryReconnect(clientMetadata, metadataEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
@@ -1882,7 +1919,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            clientTraffic.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                         }
                         else
                         {
@@ -1905,7 +1942,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    clientTraffic.Connect(masterEndpoint);
+                    TryReconnect(clientTraffic, masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1924,7 +1961,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            clientTraffic.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");

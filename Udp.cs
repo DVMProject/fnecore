@@ -67,6 +67,15 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to close the UDP socket.
+        /// </summary>
+        /// <remarks>A pending <see cref="Receive"/> will throw once the socket is closed.</remarks>
+        public void Close()
+        {
+            client.Close();
+        }
+
+        /// <summary>
         /// Sets the preshared encryption key.
         /// </summary>
         /// <param name="presharedKey"></param>
