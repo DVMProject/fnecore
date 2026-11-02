@@ -61,11 +61,17 @@ namespace fnecore
         private const int MAX_MISSED_PEER_PINGS = 5;
         private const int MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH = 16;
         private const int MIN_P25_MESSAGE_LENGTH = 23;
+        private const int RECONNECT_RETRY_MIN_MS = 1000;
+        private const int RECONNECT_RETRY_MAX_MS = 30000;
 
         private UdpReceiver clientTraffic = null;
         private UdpReceiver clientMetadata = null;
 
         private bool abortListening = false;
+
+        private readonly object reconnectLock = new object();
+        private bool trafficReconnectPending = false;
+        private bool metadataReconnectPending = false;
 
         private CancellationTokenSource listenTrafficCancelToken = new CancellationTokenSource();
         private Task listenTrafficTask = null;
@@ -903,7 +909,8 @@ namespace fnecore
         /// Helper to reconnect a UDP socket from within a listen or maintainence routine.
         /// </summary>
         /// <remarks>The listen and maintainence routines are async void, an exception thrown here would
-        /// terminate the process; failures are logged and the next pass retries instead.</remarks>
+        /// terminate the process; instead a failed reconnect is retried, with backoff, until it succeeds or
+        /// the peer is stopped.</remarks>
         /// <param name="client">UDP socket to reconnect</param>
         /// <param name="endpoint">Endpoint to reconnect to</param>
         private void TryReconnect(UdpReceiver client, IPEndPoint endpoint)
@@ -912,15 +919,97 @@ namespace fnecore
             if (abortListening)
                 return;
 
+            // a retry already owns this socket
+            lock (reconnectLock)
+            {
+                if (client == clientTraffic ? trafficReconnectPending : metadataReconnectPending)
+                    return;
+            }
+
+            if (!ConnectSocket(client, endpoint))
+                RetryReconnect(client);
+        }
+
+        /// <summary>
+        /// Helper to connect a UDP socket.
+        /// </summary>
+        /// <param name="client">UDP socket to connect</param>
+        /// <param name="endpoint">Endpoint to connect to</param>
+        /// <returns>True, if the socket connected or was closed by <see cref="Stop"/>, otherwise false.</returns>
+        private bool ConnectSocket(UdpReceiver client, IPEndPoint endpoint)
+        {
             try
             {
                 client.Connect(endpoint);
+                return true;
             }
             catch (SocketException se)
             {
                 Log(LogLevel.ERROR, $"({systemName}) failed to reconnect to {endpoint}; {se.SocketErrorCode}; {se.Message}");
+                return false;
             }
-            catch (ObjectDisposedException) { /* stub */ }
+            catch (ObjectDisposedException)
+            {
+                // closed by Stop(); nothing to retry
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Internal routine to retry a failed reconnect until it succeeds or the peer is stopped, waiting
+        /// <see cref="RECONNECT_RETRY_MIN_MS"/> before the first attempt and doubling the wait after each
+        /// failure, up to <see cref="RECONNECT_RETRY_MAX_MS"/>.
+        /// </summary>
+        /// <param name="client">UDP socket to reconnect</param>
+        private async void RetryReconnect(UdpReceiver client)
+        {
+            bool traffic = client == clientTraffic;
+            lock (reconnectLock)
+            {
+                if (traffic ? trafficReconnectPending : metadataReconnectPending)
+                    return;
+
+                if (traffic)
+                    trafficReconnectPending = true;
+                else
+                    metadataReconnectPending = true;
+            }
+
+            try
+            {
+                int delay = RECONNECT_RETRY_MIN_MS;
+                while (!abortListening)
+                {
+                    Log(LogLevel.WARNING, $"({systemName}) retrying reconnect in {delay / 1000}s");
+                    await Task.Delay(delay);
+                    if (abortListening)
+                        break;
+
+                    // re-read the endpoint each attempt, the master may have rotated to another HA endpoint
+                    IPEndPoint endpoint = traffic ? masterEndpoint : metadataEndpoint;
+                    if (ConnectSocket(client, endpoint))
+                    {
+                        Log(LogLevel.INFO, $"({systemName}) reconnected to {endpoint}");
+                        break;
+                    }
+
+                    delay = Math.Min(delay * 2, RECONNECT_RETRY_MAX_MS);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.ERROR, $"({systemName}) reconnect retry failed; {ex.Message}");
+            }
+            finally
+            {
+                lock (reconnectLock)
+                {
+                    if (traffic)
+                        trafficReconnectPending = false;
+                    else
+                        metadataReconnectPending = false;
+                }
+            }
         }
 
         /// <summary>
