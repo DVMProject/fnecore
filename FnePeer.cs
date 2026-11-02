@@ -61,11 +61,17 @@ namespace fnecore
         private const int MAX_MISSED_PEER_PINGS = 5;
         private const int MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH = 16;
         private const int MIN_P25_MESSAGE_LENGTH = 23;
+        private const int RECONNECT_RETRY_MIN_MS = 1000;
+        private const int RECONNECT_RETRY_MAX_MS = 30000;
 
         private UdpReceiver clientTraffic = null;
         private UdpReceiver clientMetadata = null;
 
         private bool abortListening = false;
+
+        private readonly object reconnectLock = new object();
+        private bool trafficReconnectPending = false;
+        private bool metadataReconnectPending = false;
 
         private CancellationTokenSource listenTrafficCancelToken = new CancellationTokenSource();
         private Task listenTrafficTask = null;
@@ -82,6 +88,7 @@ namespace fnecore
         private uint streamId = 0;
 
         private List<TalkgroupEntry> announcedTGs = new List<TalkgroupEntry>();
+        private readonly object haLock = new object();
         private List<PeerHAIPEntry> haIPs = new List<PeerHAIPEntry>();
         private int currentHAIP;
 
@@ -326,8 +333,15 @@ namespace fnecore
             Logger(LogLevel.INFO, $"({systemName}) stopping network services, {masterEndpoint}");
             ClearRadioAliasSyncRequests();
 
-            // send shutdown opcode to server
-            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            // send shutdown opcode to server (best effort, the network may already be gone)
+            try
+            {
+                SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            }
+            catch (Exception ex) when (ex is SocketException || ex is InvalidOperationException)
+            {
+                Log(LogLevel.WARNING, $"({systemName}) Failed to send closing to {masterEndpoint}; {ex.Message}");
+            }
 
             // stop UDP listen traffic task
             if (listenTrafficTask != null)
@@ -377,6 +391,12 @@ namespace fnecore
                     maintainenceCancelToken.Dispose();
                 }
             }
+
+            // close the sockets; the listen routines may be waiting on a receive that never
+            // completes if the network is gone
+            abortListening = true;
+            clientTraffic.Close();
+            clientMetadata.Close();
 
             isStarted = false;
         }
@@ -887,29 +907,142 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to reconnect a UDP socket from within a listen or maintainence routine.
+        /// </summary>
+        /// <remarks>The listen and maintainence routines are async void, an exception thrown here would
+        /// terminate the process; instead a failed reconnect is retried, with backoff, until it succeeds or
+        /// the peer is stopped.</remarks>
+        /// <param name="client">UDP socket to reconnect</param>
+        /// <param name="endpoint">Endpoint to reconnect to</param>
+        private void TryReconnect(UdpReceiver client, IPEndPoint endpoint)
+        {
+            // stopping; the socket was closed on purpose
+            if (abortListening)
+                return;
+
+            // a retry already owns this socket
+            lock (reconnectLock)
+            {
+                if (client == clientTraffic ? trafficReconnectPending : metadataReconnectPending)
+                    return;
+            }
+
+            if (!ConnectSocket(client, endpoint))
+                RetryReconnect(client);
+        }
+
+        /// <summary>
+        /// Helper to connect a UDP socket.
+        /// </summary>
+        /// <param name="client">UDP socket to connect</param>
+        /// <param name="endpoint">Endpoint to connect to</param>
+        /// <returns>True, if the socket connected or was closed by <see cref="Stop"/>, otherwise false.</returns>
+        private bool ConnectSocket(UdpReceiver client, IPEndPoint endpoint)
+        {
+            try
+            {
+                client.Connect(endpoint);
+                return true;
+            }
+            catch (SocketException se)
+            {
+                Log(LogLevel.ERROR, $"({systemName}) Failed to reconnect to {endpoint}; {se.SocketErrorCode}; {se.Message}");
+                return false;
+            }
+            catch (ObjectDisposedException)
+            {
+                // closed by Stop(); nothing to retry
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Internal routine to retry a failed reconnect until it succeeds or the peer is stopped, waiting
+        /// <see cref="RECONNECT_RETRY_MIN_MS"/> before the first attempt and doubling the wait after each
+        /// failure, up to <see cref="RECONNECT_RETRY_MAX_MS"/>.
+        /// </summary>
+        /// <param name="client">UDP socket to reconnect</param>
+        private async void RetryReconnect(UdpReceiver client)
+        {
+            bool traffic = client == clientTraffic;
+            lock (reconnectLock)
+            {
+                if (traffic ? trafficReconnectPending : metadataReconnectPending)
+                    return;
+
+                if (traffic)
+                    trafficReconnectPending = true;
+                else
+                    metadataReconnectPending = true;
+            }
+
+            try
+            {
+                int delay = RECONNECT_RETRY_MIN_MS;
+                while (!abortListening)
+                {
+                    Log(LogLevel.WARNING, $"({systemName}) Retrying reconnect in {delay / 1000}s");
+                    await Task.Delay(delay);
+                    if (abortListening)
+                        break;
+
+                    // re-read the endpoint each attempt, the master may have rotated to another HA endpoint
+                    IPEndPoint endpoint = traffic ? masterEndpoint : metadataEndpoint;
+                    if (ConnectSocket(client, endpoint))
+                    {
+                        Log(LogLevel.INFO, $"({systemName}) Reconnected to {endpoint}");
+                        break;
+                    }
+
+                    delay = Math.Min(delay * 2, RECONNECT_RETRY_MAX_MS);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.ERROR, $"({systemName}) Reconnect retry failed; {ex.Message}");
+            }
+            finally
+            {
+                lock (reconnectLock)
+                {
+                    if (traffic)
+                        trafficReconnectPending = false;
+                    else
+                        metadataReconnectPending = false;
+                }
+            }
+        }
+
+        /// <summary>
         /// Helper to rotate the master endpoint to the next HA endpoint.
         /// </summary>
         private void RotateMasterEndpont()
         {
             ClearRadioAliasSyncRequests();
-            // are we rotating IPs for HA reconnect?
-            if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
+
+            // the listen and maintainence routines may rotate at the same time, and HA parameters from the
+            // master may replace the HA IP list mid-rotation
+            lock (haLock)
             {
-
-                PeerHAIPEntry entry = haIPs[currentHAIP];
-                currentHAIP++;
-
-                if (currentHAIP > haIPs.Count)
+                // are we rotating IPs for HA reconnect?
+                if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
                 {
-                    currentHAIP = 0;
+
+                    PeerHAIPEntry entry = haIPs[currentHAIP];
+                    currentHAIP++;
+
+                    if (currentHAIP >= haIPs.Count)
+                    {
+                        currentHAIP = 0;
+                    }
+
+                    Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
+                    masterEndpoint = entry.EndPoint;
+                    metadataEndpoint = new IPEndPoint(masterEndpoint.Address, masterEndpoint.Port + 1);
                 }
 
-                Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
-                masterEndpoint = entry.EndPoint;
-                metadataEndpoint = new IPEndPoint(masterEndpoint.Address, masterEndpoint.Port + 1);
+                ++retryCount;
             }
-
-            ++retryCount;
         }
 
         /// <summary>
@@ -1222,31 +1355,34 @@ namespace fnecore
 
                                             case Constants.NET_MASTER_SUBFUNC_HA_PARAMS:                    // HA Parameters
                                                 {
-                                                    haIPs.Clear();
-                                                    currentHAIP = 0;
-                                                    maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
-
-                                                    // always add the configured address to the HA IP list
-                                                    haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
-
-                                                    uint len = FneUtils.ToUInt32(message, 6);
-                                                    if (len > 0)
-                                                        len /= Constants.HAParamsEntryLen;
-
-                                                    int offs = 10;
-                                                    for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                    lock (haLock)
                                                     {
-                                                        uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
-                                                        ushort port = FneUtils.ToUInt16(message, offs + 8);
+                                                        haIPs.Clear();
+                                                        currentHAIP = 0;
+                                                        maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
 
-                                                        IPAddress address = new IPAddress(ipAddr);
-                                                        haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
-                                                    }
+                                                        // always add the configured address to the HA IP list
+                                                        haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
 
-                                                    if (haIPs.Count > 1)
-                                                    {
-                                                        currentHAIP = 1;
-                                                        Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                        uint len = FneUtils.ToUInt32(message, 6);
+                                                        if (len > 0)
+                                                            len /= Constants.HAParamsEntryLen;
+
+                                                        int offs = 10;
+                                                        for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                        {
+                                                            uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
+                                                            ushort port = FneUtils.ToUInt16(message, offs + 8);
+
+                                                            IPAddress address = new IPAddress(ipAddr);
+                                                            haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
+                                                        }
+
+                                                        if (haIPs.Count > 1)
+                                                        {
+                                                            currentHAIP = 1;
+                                                            Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                        }
                                                     }
                                                 }
                                                 break;
@@ -1541,7 +1677,10 @@ namespace fnecore
                                             Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
 
                                             this.streamId = 0;
-                                            retryCount = 0; // reset retry count
+                                            lock (haLock)
+                                            {
+                                                retryCount = 0; // reset retry count
+                                            }
 
                                             // userland actions
                                             FirePeerConnected(new PeerConnectedEvent(peerId, info));
@@ -1648,7 +1787,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    clientTraffic.Connect(masterEndpoint);
+                    TryReconnect(clientTraffic, masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1659,6 +1798,14 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
                             RotateMasterEndpont();
 
@@ -1667,7 +1814,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            clientTraffic.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
@@ -1814,7 +1961,7 @@ namespace fnecore
                 catch (InvalidOperationException)
                 {
                     Log(LogLevel.WARNING, $"({systemName}) Metadata receiver entered invalid state; reconnecting metadata socket to {metadataEndpoint}");
-                    clientMetadata.Connect(metadataEndpoint);
+                    TryReconnect(clientMetadata, metadataEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1825,8 +1972,16 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.WARNING, $"({systemName}) Metadata socket error {se.SocketErrorCode}; reconnecting metadata socket to {metadataEndpoint}");
-                            clientMetadata.Connect(metadataEndpoint);
+                            TryReconnect(clientMetadata, metadataEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
@@ -1882,7 +2037,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            clientTraffic.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                         }
                         else
                         {
@@ -1905,7 +2060,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    clientTraffic.Connect(masterEndpoint);
+                    TryReconnect(clientTraffic, masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1916,6 +2071,14 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
                             RotateMasterEndpont();
 
@@ -1924,7 +2087,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            clientTraffic.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");

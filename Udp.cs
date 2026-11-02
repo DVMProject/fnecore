@@ -47,6 +47,8 @@ namespace fnecore
         protected const int AES_BLOCK_BYTES = 16;
 
         protected UdpClient client;
+        protected readonly object clientLock = new object();
+        protected bool closed = false;
 
         protected bool isCryptoWrapped;
         protected byte[] presharedKey;
@@ -64,6 +66,20 @@ namespace fnecore
 
             isCryptoWrapped = false;
             presharedKey = null;
+        }
+
+        /// <summary>
+        /// Helper to close the UDP socket.
+        /// </summary>
+        /// <remarks>A pending <see cref="Receive"/> will throw once the socket is closed. A send already in
+        /// progress completes first, and later sends are dropped.</remarks>
+        public void Close()
+        {
+            lock (clientLock)
+            {
+                closed = true;
+                client.Close();
+            }
         }
 
         /// <summary>
@@ -312,10 +328,18 @@ namespace fnecore
                 frame.Message = buffer;
             }
 
-            if (connected)
-                client.Send(frame.Message, frame.Message.Length);
-            else
-                client.Send(frame.Message, frame.Message.Length, frame.Endpoint);
+            // a send racing Close() (e.g. a call terminator sent while the peer stops) must not throw into
+            // the caller; once closed, the frame is dropped
+            lock (clientLock)
+            {
+                if (closed)
+                    return;
+
+                if (connected)
+                    client.Send(frame.Message, frame.Message.Length);
+                else
+                    client.Send(frame.Message, frame.Message.Length, frame.Endpoint);
+            }
         }
     } // public class UdpReceiver : UdpBase
 } // namespace fnecore
