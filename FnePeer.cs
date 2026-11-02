@@ -339,7 +339,7 @@ namespace fnecore
             }
             catch (Exception ex) when (ex is SocketException || ex is InvalidOperationException)
             {
-                Log(LogLevel.WARNING, $"({systemName}) failed to send closing to {masterEndpoint}; {ex.Message}");
+                Log(LogLevel.WARNING, $"({systemName}) Failed to send closing to {masterEndpoint}; {ex.Message}");
             }
 
             // stop UDP listen traffic task
@@ -945,7 +945,7 @@ namespace fnecore
             }
             catch (SocketException se)
             {
-                Log(LogLevel.ERROR, $"({systemName}) failed to reconnect to {endpoint}; {se.SocketErrorCode}; {se.Message}");
+                Log(LogLevel.ERROR, $"({systemName}) Failed to reconnect to {endpoint}; {se.SocketErrorCode}; {se.Message}");
                 return false;
             }
             catch (ObjectDisposedException)
@@ -980,7 +980,7 @@ namespace fnecore
                 int delay = RECONNECT_RETRY_MIN_MS;
                 while (!abortListening)
                 {
-                    Log(LogLevel.WARNING, $"({systemName}) retrying reconnect in {delay / 1000}s");
+                    Log(LogLevel.WARNING, $"({systemName}) Retrying reconnect in {delay / 1000}s");
                     await Task.Delay(delay);
                     if (abortListening)
                         break;
@@ -989,7 +989,7 @@ namespace fnecore
                     IPEndPoint endpoint = traffic ? masterEndpoint : metadataEndpoint;
                     if (ConnectSocket(client, endpoint))
                     {
-                        Log(LogLevel.INFO, $"({systemName}) reconnected to {endpoint}");
+                        Log(LogLevel.INFO, $"({systemName}) Reconnected to {endpoint}");
                         break;
                     }
 
@@ -998,7 +998,7 @@ namespace fnecore
             }
             catch (Exception ex)
             {
-                Log(LogLevel.ERROR, $"({systemName}) reconnect retry failed; {ex.Message}");
+                Log(LogLevel.ERROR, $"({systemName}) Reconnect retry failed; {ex.Message}");
             }
             finally
             {
@@ -1785,8 +1785,7 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
-                        // the network went away (interface down, route lost, address changed); reconnect
-                        // rather than abort, so the peer recovers once the network returns
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
                         case SocketError.NetworkDown:
                         case SocketError.NetworkUnreachable:
                         case SocketError.NetworkReset:
@@ -1960,8 +1959,7 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
-                        // the network went away (interface down, route lost, address changed); reconnect
-                        // rather than abort, so the peer recovers once the network returns
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
                         case SocketError.NetworkDown:
                         case SocketError.NetworkUnreachable:
                         case SocketError.NetworkReset:
@@ -2060,8 +2058,7 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
-                        // the network went away (interface down, route lost, address changed); reconnect
-                        // rather than abort, so the peer recovers once the network returns
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
                         case SocketError.NetworkDown:
                         case SocketError.NetworkUnreachable:
                         case SocketError.NetworkReset:
