@@ -1025,7 +1025,7 @@ namespace fnecore
                 PeerHAIPEntry entry = haIPs[currentHAIP];
                 currentHAIP++;
 
-                if (currentHAIP > haIPs.Count)
+                if (currentHAIP >= haIPs.Count)
                 {
                     currentHAIP = 0;
                 }
