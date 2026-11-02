@@ -88,6 +88,7 @@ namespace fnecore
         private uint streamId = 0;
 
         private List<TalkgroupEntry> announcedTGs = new List<TalkgroupEntry>();
+        private readonly object haLock = new object();
         private List<PeerHAIPEntry> haIPs = new List<PeerHAIPEntry>();
         private int currentHAIP;
 
@@ -1018,24 +1019,30 @@ namespace fnecore
         private void RotateMasterEndpont()
         {
             ClearRadioAliasSyncRequests();
-            // are we rotating IPs for HA reconnect?
-            if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
+
+            // the listen and maintainence routines may rotate at the same time, and HA parameters from the
+            // master may replace the HA IP list mid-rotation
+            lock (haLock)
             {
-
-                PeerHAIPEntry entry = haIPs[currentHAIP];
-                currentHAIP++;
-
-                if (currentHAIP >= haIPs.Count)
+                // are we rotating IPs for HA reconnect?
+                if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
                 {
-                    currentHAIP = 0;
+
+                    PeerHAIPEntry entry = haIPs[currentHAIP];
+                    currentHAIP++;
+
+                    if (currentHAIP >= haIPs.Count)
+                    {
+                        currentHAIP = 0;
+                    }
+
+                    Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
+                    masterEndpoint = entry.EndPoint;
+                    metadataEndpoint = new IPEndPoint(masterEndpoint.Address, masterEndpoint.Port + 1);
                 }
 
-                Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
-                masterEndpoint = entry.EndPoint;
-                metadataEndpoint = new IPEndPoint(masterEndpoint.Address, masterEndpoint.Port + 1);
+                ++retryCount;
             }
-
-            ++retryCount;
         }
 
         /// <summary>
@@ -1348,31 +1355,34 @@ namespace fnecore
 
                                             case Constants.NET_MASTER_SUBFUNC_HA_PARAMS:                    // HA Parameters
                                                 {
-                                                    haIPs.Clear();
-                                                    currentHAIP = 0;
-                                                    maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
-
-                                                    // always add the configured address to the HA IP list
-                                                    haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
-
-                                                    uint len = FneUtils.ToUInt32(message, 6);
-                                                    if (len > 0)
-                                                        len /= Constants.HAParamsEntryLen;
-
-                                                    int offs = 10;
-                                                    for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                    lock (haLock)
                                                     {
-                                                        uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
-                                                        ushort port = FneUtils.ToUInt16(message, offs + 8);
+                                                        haIPs.Clear();
+                                                        currentHAIP = 0;
+                                                        maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
 
-                                                        IPAddress address = new IPAddress(ipAddr);
-                                                        haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
-                                                    }
+                                                        // always add the configured address to the HA IP list
+                                                        haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
 
-                                                    if (haIPs.Count > 1)
-                                                    {
-                                                        currentHAIP = 1;
-                                                        Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                        uint len = FneUtils.ToUInt32(message, 6);
+                                                        if (len > 0)
+                                                            len /= Constants.HAParamsEntryLen;
+
+                                                        int offs = 10;
+                                                        for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                        {
+                                                            uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
+                                                            ushort port = FneUtils.ToUInt16(message, offs + 8);
+
+                                                            IPAddress address = new IPAddress(ipAddr);
+                                                            haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
+                                                        }
+
+                                                        if (haIPs.Count > 1)
+                                                        {
+                                                            currentHAIP = 1;
+                                                            Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                        }
                                                     }
                                                 }
                                                 break;
@@ -1667,7 +1677,10 @@ namespace fnecore
                                             Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
 
                                             this.streamId = 0;
-                                            retryCount = 0; // reset retry count
+                                            lock (haLock)
+                                            {
+                                                retryCount = 0; // reset retry count
+                                            }
 
                                             // userland actions
                                             FirePeerConnected(new PeerConnectedEvent(peerId, info));
