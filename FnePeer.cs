@@ -1785,6 +1785,15 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // the network went away (interface down, route lost, address changed); reconnect
+                        // rather than abort, so the peer recovers once the network returns
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
                             RotateMasterEndpont();
 
@@ -1951,6 +1960,15 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // the network went away (interface down, route lost, address changed); reconnect
+                        // rather than abort, so the peer recovers once the network returns
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.WARNING, $"({systemName}) Metadata socket error {se.SocketErrorCode}; reconnecting metadata socket to {metadataEndpoint}");
                             TryReconnect(clientMetadata, metadataEndpoint);
                             break;
@@ -2042,6 +2060,15 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // the network went away (interface down, route lost, address changed); reconnect
+                        // rather than abort, so the peer recovers once the network returns
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
                             RotateMasterEndpont();
 
