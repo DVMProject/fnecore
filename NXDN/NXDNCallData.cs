@@ -27,6 +27,11 @@ namespace fnecore.NXDN
         public bool IsReleased { get; internal set; }
         public bool IsEncrypted => AlgorithmId != NXDNCrypto.Clear;
         public bool HasCallInfo { get; internal set; }
+        /// <summary>
+        /// Whether the last decoded packet passed the receive checks, independent
+        /// of playable audio. Rejected, duplicate, and stale packets leave this false.
+        /// </summary>
+        public bool LastPacketAccepted { get; internal set; }
         public NXDNCrypto Crypto { get; } = new NXDNCrypto();
 
         internal readonly byte[] Fragments = new byte[9];
@@ -63,7 +68,7 @@ namespace fnecore.NXDN
             TxStreamID = 0;
             Ran = 0;
             Group = true;
-            IsReleased = HasCallInfo = IndicatorKnown = Transmitting = Invalid = false;
+            IsReleased = HasCallInfo = LastPacketAccepted = IndicatorKnown = Transmitting = Invalid = false;
             FragmentQuarter = LastSequence = PreparedSession = -1;
             VoiceFrame = 0;
             CurrentIndicator = 0;

@@ -254,10 +254,13 @@ namespace fnecore.NXDN
         /// <summary>
         /// Decodes a packet to up to four clear vocoder codewords. Unknown crypto,
         /// incomplete late-entry signaling, duplicates, and stale packets are muted.
+        /// Check LastPacketAccepted separately: an accepted packet may return no audio.
         /// </summary>
         public static int Decode(NXDNCallData call, ReadOnlySpan<byte> packet, ushort sequence,
             Span<byte> voice, INxdnAmbeCodec codec, Func<byte, ushort, byte[]> resolveKey)
         {
+            if (call == null) throw new ArgumentNullException(nameof(call));
+            call.LastPacketAccepted = false;
             if (call.Disposed) throw new ObjectDisposedException(nameof(NXDNCallData));
             if (call.Invalid || call.IsReleased) return 0;
             call.CheckActive();
@@ -270,31 +273,39 @@ namespace fnecore.NXDN
             int gap = call.LastSequence < 0 ? 1 : (sequence - call.LastSequence + 65535) % 65535;
             if (sequence != ushort.MaxValue && (gap == 0 || gap > 32767)) return 0;
             if (sequence == ushort.MaxValue && superframe) return 0;
-            if (gap != 1) call.FragmentQuarter = -1;
-            if (gap > 64)
-            {
-                call.IndicatorKnown = false;
-                call.PreparedSession = -1;
-            }
-            if (superframe && call.LastSequence >= 0) call.VoiceFrame += gap - 1;
-            if (sequence != ushort.MaxValue) call.LastSequence = sequence;
-
             Span<byte> slow = stackalloc byte[4];
             bool validSlow = NXDNChannelCoding.Decode(frame, 36, slow, true);
             if (validSlow) call.Ran = (byte)(slow[0] & 63);
             Span<byte> control = stackalloc byte[10];
             bool nextIndicator = false;
             ulong nextValue = 0;
+            bool acceptedControl = false;
+            bool headerIndicator = false;
             for (int half = 0; half < 2; half++)
             {
                 // Option 1 steals the first half; option 2 steals the second.
                 bool stolen = option == 0 || option == half + 1;
                 if (!stolen || !NXDNChannelCoding.Decode(frame, 96 + half * 144, control, false)) continue;
                 if (!call.LinkControl.Decode(control)) continue;
-                ApplyControl(call, call.LinkControl, !superframe, resolveKey);
+                acceptedControl |= ApplyControl(call, call.LinkControl, !superframe, resolveKey);
+                headerIndicator |= !superframe && call.VoiceFrame == 0 &&
+                    call.LinkControl.MessageType == NXDNMessageType.MESSAGE_TYPE_VCALL_IV && call.LinkControl.MessageIndicator != 0;
             }
-            if (call.IsReleased || call.Invalid) return 0;
-            if (!superframe) return 0;
+            if (call.Invalid || (!superframe && !acceptedControl)) return 0;
+            // Rejected control frames must not consume a sequence or break crypto synchronization.
+            if (gap != 1) call.FragmentQuarter = -1;
+            if (gap > 64 && !headerIndicator)
+            {
+                call.IndicatorKnown = false;
+                call.PreparedSession = -1;
+            }
+            if (superframe && call.LastSequence >= 0) call.VoiceFrame += gap - 1;
+            if (sequence != ushort.MaxValue) call.LastSequence = sequence;
+            if (call.IsReleased || !superframe)
+            {
+                call.LastPacketAccepted = true;
+                return 0;
+            }
 
             if (!validSlow) call.FragmentQuarter = -1;
             else
@@ -321,6 +332,8 @@ namespace fnecore.NXDN
                 }
                 else call.FragmentQuarter = -1;
             }
+            if (call.Invalid) return 0;
+            call.LastPacketAccepted = true;
             int count = 0;
             bool ready = call.HasCallInfo && !call.Invalid && PrepareSession(call);
             for (int word = 0; word < 4; word++)
@@ -343,7 +356,7 @@ namespace fnecore.NXDN
             return count;
         }
 
-        private static void ApplyControl(NXDNCallData call, RTCH control, bool header, Func<byte, ushort, byte[]> resolveKey)
+        private static bool ApplyControl(NXDNCallData call, RTCH control, bool header, Func<byte, ushort, byte[]> resolveKey)
         {
             byte type = (byte)control.MessageType;
             if (type == 3)
@@ -354,17 +367,17 @@ namespace fnecore.NXDN
                     call.IndicatorKnown = true;
                     call.PreparedSession = -1;
                 }
-                return;
+                return control.MessageIndicator != 0;
             }
-            if (type != 1 && type != 7 && type != 8) return;
-            if (control.SrcId != call.SrcId || control.DstId != call.DstId || (control.CallType != 4) != call.Group) return;
-            if (type == 7 || type == 8) { call.IsReleased = true; return; }
-            if (control.TransmissionMode != 0) { call.Invalid = true; return; }
+            if (type != 1 && type != 7 && type != 8) return false;
+            if (control.SrcId != call.SrcId || control.DstId != call.DstId || (control.CallType != 4) != call.Group) return false;
+            if (type == 7 || type == 8) { call.IsReleased = true; return true; }
+            if (control.TransmissionMode != 0) { call.Invalid = true; return false; }
             if (call.HasCallInfo && (call.AlgorithmId != control.CipherType || call.KeyId != control.KeyId))
             {
                 call.Invalid = true;
                 call.Crypto.Reset();
-                return;
+                return false;
             }
             call.HasCallInfo = true;
             call.AlgorithmId = control.CipherType;
@@ -373,10 +386,11 @@ namespace fnecore.NXDN
             if (call.IsEncrypted && !call.Crypto.HasKey())
             {
                 byte[] material = resolveKey?.Invoke(call.AlgorithmId, call.KeyId);
-                if (material == null) return;
+                if (material == null) return true;
                 try { call.Crypto.SetKey(call.KeyId, call.AlgorithmId, material); call.PreparedSession = -1; }
                 finally { CryptographicOperations.ZeroMemory(material); }
             }
+            return true;
         }
     }
 }
