@@ -1764,6 +1764,10 @@ namespace fnecore
                                 }
                                 break;
 
+                            case Constants.NET_FUNC_TRANSFER when fneHeader.SubFunction == Constants.NET_TRANSFER_SUBFUNC_PATCH_STATUS:
+                                HandlePatchStatusMessage(message);
+                                break;
+
                             default:
                                 // are we handling anything else with a user handler?
                                 if (UserPacketHandler != null)
