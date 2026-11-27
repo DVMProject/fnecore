@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022,2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022,2025,2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -179,6 +179,36 @@ namespace fnecore
     } // public enum DVMState : byte
 
     /// <summary>
+    /// Peer Connection Class Enumerations
+    /// </summary>
+    public enum PeerConnectionClass : byte
+    {
+        /// <summary>
+        /// Unknown
+        /// </summary>
+        PEER_CONN_CLASS_UNKNOWN,
+
+        /// <summary>
+        /// Neighbor FNE Peer
+        /// </summary>
+        PEER_CONN_CLASS_NEIGHBOR,
+
+        /// <summary>
+        /// Standard Peer
+        /// </summary>
+        PEER_CONN_CLASS_STANDARD,
+
+        /// <summary>
+        /// SysView Peer
+        /// </summary>
+        PEER_CONN_CLASS_SYSVIEW,
+        /// <summary>
+        /// Console Peer
+        /// </summary>
+        PEER_CONN_CLASS_CONSOLE,
+    } // public enum PeerConnectionClass : byte
+
+    /// <summary>
     /// This class defines commonly used protocol and internal constants.
     /// </summary>
     public sealed class Constants
@@ -202,7 +232,7 @@ namespace fnecore
         public const uint P25TSDUPacketLength = 69U;        // 24 byte header + TSDU data
         public const uint P25TDULCPacketLength = 78U;       // 24 byte header + TDULC data
         public const uint NXDNPacketLength = 70U;           // 20 byte header + NXDN_FRAME_LENGTH_BYTES + 2 byte trailer
-        public const uint AnalogPacketLength = 324U;        // 20 byte header + AUDIO_SAMPLES_LENGTH_BYTES + 4 byte trailer
+        public const uint AnalogPacketLength = 344U;        // 20 byte header + AUDIO_SAMPLES_LENGTH_BYTES + 4 byte trailer
 
         public const uint HAParamsEntryLen = 20;
 
@@ -218,7 +248,7 @@ namespace fnecore
         public const byte NET_PROTOCOL_SUBFUNC_DMR = 0x00;                      // DMR
         public const byte NET_PROTOCOL_SUBFUNC_P25 = 0x01;                      // P25
         public const byte NET_PROTOCOL_SUBFUNC_NXDN = 0x02;                     // NXDN
-        public const byte NET_PROTOCOL_SUBFUNC_ANALOG = 0x03;                   // Analog
+        public const byte NET_PROTOCOL_SUBFUNC_ANALOG = 0x0F;                   // Analog
 
         public const byte NET_FUNC_MASTER = 0x01;                               // Network Master Function
         public const byte NET_MASTER_SUBFUNC_WL_RID = 0x00;                     // Whitelist RIDs
@@ -245,10 +275,16 @@ namespace fnecore
         public const byte NET_FUNC_ACK = 0x7E;                                  // Packet Acknowledge
         public const byte NET_FUNC_NAK = 0x7F;                                  // Packet Negative Acknowledge
 
+        public const byte NET_FUNC_RADIO_ALIAS_SYNC = 0x85;                     // Radio Alias Sync
+
+        public const byte NET_FUNC_KEYS_INVENTORY = 0x8E;                       // Encryption Key Container Inventory
+        public const byte NET_FUNC_KEYS_UPDATE = 0x8F;                          // Encryption Key Container Update
+
         public const byte NET_FUNC_TRANSFER = 0x90;                             // Network Transfer Function
         public const byte NET_TRANSFER_SUBFUNC_ACTIVITY = 0x01;                 // Activity Log Transfer
         public const byte NET_TRANSFER_SUBFUNC_DIAG = 0x02;                     // Diagnostic Log Transfer
         public const byte NET_TRANSFER_SUBFUNC_STATUS = 0x03;                   // Status Transfer
+        public const byte NET_TRANSFER_SUBFUNC_PATCH_STATUS = 0x04;             // Console Patch Status Registry Transfer
 
         public const byte NET_FUNC_ANNOUNCE = 0x91;                             // Network Announce Function
         public const byte NET_ANNC_SUBFUNC_GRP_AFFIL = 0x00;                    // Announce Group Affiliation

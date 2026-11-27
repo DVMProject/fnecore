@@ -167,6 +167,7 @@ namespace fnecore.P25
 
         public const byte KMM_DECRYPT_INSTRUCTION_NONE = 0x00;
         public const byte KMM_DECRYPT_INSTRUCTION_MI = 0x40;
+        public const byte KMM_DECRYPT_PEER_ENC = 0x80;
 
         public const byte P25_MI_LENGTH = 9;
 

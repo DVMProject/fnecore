@@ -71,6 +71,6 @@ namespace fnecore.DMR
         /// <summary>
         /// UU VCH USER - Unit-to-Unit Voice Channel User
         /// </summary>
-        FLCO_PRIVATE = 0x01,
+        FLCO_PRIVATE = 0x03,
     } // public enum DMRFLCO : byte
 } // namespace fnecore.DMR

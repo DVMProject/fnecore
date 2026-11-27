@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022,2024 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022,2024,2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -44,8 +44,11 @@ namespace fnecore
     {
         protected const ushort AES_WRAPPED_PCKT_MAGIC = 0xC0FE;
         protected const int AES_BLOCK_SIZE = 128;
+        protected const int AES_BLOCK_BYTES = 16;
 
         protected UdpClient client;
+        protected readonly object clientLock = new object();
+        protected bool closed = false;
 
         protected bool isCryptoWrapped;
         protected byte[] presharedKey;
@@ -63,6 +66,20 @@ namespace fnecore
 
             isCryptoWrapped = false;
             presharedKey = null;
+        }
+
+        /// <summary>
+        /// Helper to close the UDP socket.
+        /// </summary>
+        /// <remarks>A pending <see cref="Receive"/> will throw once the socket is closed. A send already in
+        /// progress completes first, and later sends are dropped.</remarks>
+        public void Close()
+        {
+            lock (clientLock)
+            {
+                closed = true;
+                client.Close();
+            }
         }
 
         /// <summary>
@@ -99,27 +116,28 @@ namespace fnecore
                 ushort magic = FneUtils.ToUInt16(res.Buffer, 0);
                 if (magic == AES_WRAPPED_PCKT_MAGIC)
                 {
-                    int cryptedLen = res.Buffer.Length - 2;
-                    byte[] cryptoBuffer = new byte[cryptedLen];
-                    Buffer.BlockCopy(res.Buffer, 2, cryptoBuffer, 0, cryptedLen);
-
-                    // decrypt
-                    byte[] decrypted = Decrypt(cryptoBuffer, presharedKey);
-
-                    // finalize, cleanup buffers, and replace with new
-                    if (decrypted != null)
-                    {
-                        buffer = decrypted;
-                    }
+                    int cryptedLen = res.Buffer.Length - 18;
+                    if (cryptedLen < AES_BLOCK_BYTES || (cryptedLen % AES_BLOCK_BYTES) != 0)
+                        buffer = new byte[0];
                     else
                     {
-                        buffer = new byte[0];
+                        byte[] cryptoBuffer = new byte[cryptedLen];
+                        byte[] iv = new byte[AES_BLOCK_BYTES];
+                        Buffer.BlockCopy(res.Buffer, 2, cryptoBuffer, 0, cryptedLen);
+                        Buffer.BlockCopy(res.Buffer, res.Buffer.Length - AES_BLOCK_BYTES, iv, 0, AES_BLOCK_BYTES);
+
+                        // decrypt
+                        byte[] decrypted = Decrypt(cryptoBuffer, presharedKey, iv);
+
+                        // finalize, cleanup buffers, and replace with new
+                        if (decrypted != null)
+                            buffer = decrypted;
+                        else
+                            buffer = new byte[0];
                     }
                 }
                 else
-                {
                     buffer = new byte[0]; // this will effectively discard packets without the packet magic
-                }
             }
 
             return new UdpFrame()
@@ -130,29 +148,40 @@ namespace fnecore
         }
 
         /// <summary>
-        /// 
+        /// Encrypts the given buffer using the specified key.
         /// </summary>
-        /// <param name="buffer"></param>
-        /// <param name="key"></param>
-        /// <returns></returns>
+        /// <param name="buffer">The data to encrypt.</param>
+        /// <param name="key">The encryption key.</param>
+        /// <returns>The encrypted data.</returns>
         protected static byte[] Encrypt(byte[] buffer, byte[] key)
         {
+            return Encrypt(buffer, key, out _);
+        }
+
+        /// <summary>
+        /// Encrypts the given buffer using the specified key and outputs the initialization vector (IV).
+        /// </summary>
+        /// <param name="buffer">The data to encrypt.</param>
+        /// <param name="key">The encryption key.</param>
+        /// <param name="iv">The generated initialization vector (IV) used for encryption.</param>
+        /// <returns>The encrypted data.</returns>
+        protected static byte[] Encrypt(byte[] buffer, byte[] key, out byte[] iv)
+        {
             byte[] encrypted = null;
-            using (AesManaged aes = new AesManaged()
+            using (AesManaged aes = new AesManaged() { KeySize = 256, Key = key, BlockSize = AES_BLOCK_SIZE, 
+                Mode = CipherMode.CBC, Padding = PaddingMode.None, })
             {
-                KeySize = 256,
-                Key = key,
-                BlockSize = AES_BLOCK_SIZE,
-                Mode = CipherMode.ECB,
-                Padding = PaddingMode.Zeros,
-                IV = new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
-            })
-            {
-                ICryptoTransform encryptor = aes.CreateEncryptor();
+                // generate a new initialization vector (IV) for encryption
+                aes.GenerateIV();
+                iv = aes.IV;
+
+                // create an encryptor to perform the encryption
+                ICryptoTransform encryptor = aes.CreateEncryptor(aes.Key, iv);
                 using (MemoryStream ms = new MemoryStream())
                 using (CryptoStream cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
                 {
                     cs.Write(buffer, 0, buffer.Length);
+                    cs.FlushFinalBlock();
                     encrypted = ms.ToArray();
                 }
             }
@@ -161,24 +190,19 @@ namespace fnecore
         }
 
         /// <summary>
-        /// 
+        /// Decrypts the given buffer using the specified key and initialization vector (IV).
         /// </summary>
-        /// <param name="buffer"></param>
-        /// <param name="key"></param>
-        /// <returns></returns>
-        protected static byte[] Decrypt(byte[] buffer, byte[] key)
+        /// <param name="buffer">The data to decrypt.</param>
+        /// <param name="key">The encryption key.</param>
+        /// <param name="iv">The initialization vector (IV) used for decryption.</param>
+        /// <returns>The decrypted data.</returns>
+        protected static byte[] Decrypt(byte[] buffer, byte[] key, byte[] iv)
         {
-            using (AesManaged aes = new AesManaged()
+            using (AesManaged aes = new AesManaged() { KeySize = 256, Key = key, BlockSize = AES_BLOCK_SIZE, 
+                Mode = CipherMode.CBC, Padding = PaddingMode.None, IV = iv })
             {
-                KeySize = 256,
-                Key = key,
-                BlockSize = 128,
-                Mode = CipherMode.ECB,
-                Padding = PaddingMode.Zeros,
-                IV = new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
-            })
-            {
-                ICryptoTransform decryptor = aes.CreateDecryptor();
+                // create a decryptor to perform the decryption
+                ICryptoTransform decryptor = aes.CreateDecryptor(aes.Key, iv);
                 using (MemoryStream ms = new MemoryStream(buffer))
                 using (CryptoStream cs = new CryptoStream(ms, decryptor, CryptoStreamMode.Read))
                 using (MemoryStream resultStream = new MemoryStream())
@@ -196,6 +220,7 @@ namespace fnecore
     public class UdpReceiver : UdpBase
     {
         private IPEndPoint endpoint;
+        private bool connected;
 
         /*
         ** Properties
@@ -247,7 +272,8 @@ namespace fnecore
                 return;
             }
 
-            client.Connect(endpoint.Address.ToString(), endpoint.Port); 
+            client.Connect(endpoint.Address.ToString(), endpoint.Port);
+            connected = true;
         }
 
         /// <summary>
@@ -260,6 +286,7 @@ namespace fnecore
             UdpReceiver recv = new UdpReceiver();
             this.endpoint = endpoint;
             client.Connect(endpoint.Address.ToString(), endpoint.Port);
+            connected = true;
         }
 
         /// <summary>
@@ -279,29 +306,40 @@ namespace fnecore
                 // calculate the length of the encrypted data
                 int cryptedLen = buffer.Length;
 
-                // calculate the padding needed to make the buffer a multiple of AES_BLOCK_SIZE
-                int paddingLen = AES_BLOCK_SIZE - (cryptedLen % AES_BLOCK_SIZE);
-                if (paddingLen == AES_BLOCK_SIZE)
-                {
-                    paddingLen = 0; // no padding needed if already a multiple of AES_BLOCK_SIZE
-                }
+                // calculate the padding needed to make the buffer a multiple of AES_BLOCK_BYTES
+                int paddingLen = AES_BLOCK_BYTES - (cryptedLen % AES_BLOCK_BYTES);
+                if (paddingLen == AES_BLOCK_BYTES)
+                    paddingLen = 0; // no padding needed if already a multiple of AES_BLOCK_BYTES
 
                 byte[] cryptoBuffer = new byte[cryptedLen + paddingLen];
                 Buffer.BlockCopy(buffer, 0, cryptoBuffer, 0, buffer.Length);
 
                 // encrypt the buffer
-                byte[] crypted = Encrypt(cryptoBuffer, presharedKey);
+                byte[] iv;
+                byte[] crypted = Encrypt(cryptoBuffer, presharedKey, out iv);
 
-                // create the final buffer with the magic number and encrypted data
-                buffer = new byte[crypted.Length + 2];
+                // create the final buffer with the magic number, encrypted data, and IV trailer
+                buffer = new byte[crypted.Length + 18];
                 Buffer.BlockCopy(crypted, 0, buffer, 2, crypted.Length);
                 FneUtils.WriteBytes(AES_WRAPPED_PCKT_MAGIC, ref buffer, 0);
+                Buffer.BlockCopy(iv, 0, buffer, 2 + crypted.Length, AES_BLOCK_BYTES);
 
                 // set the length to the actual length of the buffer to be sent
                 frame.Message = buffer;
             }
 
-            client.Send(frame.Message, frame.Message.Length);
+            // a send racing Close() (e.g. a call terminator sent while the peer stops) must not throw into
+            // the caller; once closed, the frame is dropped
+            lock (clientLock)
+            {
+                if (closed)
+                    return;
+
+                if (connected)
+                    client.Send(frame.Message, frame.Message.Length);
+                else
+                    client.Send(frame.Message, frame.Message.Length, frame.Endpoint);
+            }
         }
     } // public class UdpReceiver : UdpBase
 } // namespace fnecore

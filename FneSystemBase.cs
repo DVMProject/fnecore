@@ -143,7 +143,7 @@ namespace fnecore
     /// <summary>
     /// Implements a FNE system.
     /// </summary>
-    public abstract class FneSystemBase
+    public abstract partial class FneSystemBase
     {
         protected FnePeer fne;
 
@@ -223,6 +223,8 @@ namespace fnecore
 
             this.fne.NXDNDataValidate = NXDNDataValidate;
             this.fne.NXDNDataReceived += NXDNDataReceived;
+
+            this.fne.AnalogDataReceived += AnalogDataReceived;
 
             this.fne.PeerIgnored = PeerIgnored;
             this.fne.PeerConnected += PeerConnected;
@@ -322,6 +324,9 @@ namespace fnecore
         /// <param name="e"></param>
         protected abstract void NXDNDataReceived(object sender, NXDNDataReceivedEvent e);
 
+        /// <summary>Event handler for received analog group voice.</summary>
+        protected virtual void AnalogDataReceived(object sender, AnalogDataReceivedEvent e) { }
+
         /// <summary>
         /// Callback used to process whether or not a peer is being ignored for traffic.
         /// </summary>
@@ -385,41 +390,41 @@ namespace fnecore
         /// <param name="embeddedData"></param>
         protected virtual void SendDMRTerminator(RemoteCallData callData, ref int seqNo, ref byte dmrN, EmbeddedData embeddedData)
         {
-            byte n = (byte)((seqNo - 3U) % 6U);
-            uint fill = 6U - n;
+            if (callData == null || embeddedData == null || callData.TxStreamID == 0 || seqNo <= 0)
+                return;
+
+            byte nextN = (byte)((dmrN + 1) % 6);
+            int fill = (6 - nextN) % 6;
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
 
             byte[] data = null, dmrpkt = null;
-            if (n > 0U)
+            for (int i = 0; i < fill; i++)
             {
-                for (uint i = 0U; i < fill; i++)
-                {
-                    // generate DMR AMBE data
-                    data = new byte[DMR_FRAME_LENGTH_BYTES];
-                    Buffer.BlockCopy(DMR_SILENCE_DATA, 0, data, 0, DMR_FRAME_LENGTH_BYTES);
+                byte n = (byte)((nextN + i) % 6);
+                data = new byte[DMR_FRAME_LENGTH_BYTES];
+                // The shared silence constant includes two modem tag bytes.
+                Buffer.BlockCopy(DMR_SILENCE_DATA, 2, data, 0, DMR_FRAME_LENGTH_BYTES);
 
-                    byte lcss = embeddedData.GetData(ref data, n);
+                byte lcss = embeddedData.GetData(ref data, n);
 
-                    // generated embedded signalling
-                    EMB emb = new EMB();
-                    emb.ColorCode = 0;
-                    emb.LCSS = lcss;
-                    emb.Encode(ref data);
+                EMB emb = new EMB();
+                emb.ColorCode = 0;
+                emb.LCSS = lcss;
+                emb.Encode(ref data);
 
-                    // generate DMR network frame
-                    dmrpkt = new byte[DMR_PACKET_SIZE];
-                    callData.FrameType = FrameType.DATA_SYNC;
+                dmrpkt = new byte[DMR_PACKET_SIZE];
+                callData.FrameType = FrameType.VOICE;
 
-                    CreateDMRMessage(ref dmrpkt, callData, (byte)seqNo, n);
-                    Buffer.BlockCopy(data, 0, dmrpkt, 20, DMR_FRAME_LENGTH_BYTES);
+                CreateDMRMessage(ref dmrpkt, callData, (byte)seqNo, n);
+                Buffer.BlockCopy(data, 0, dmrpkt, 20, DMR_FRAME_LENGTH_BYTES);
 
-                    peer.SendMaster(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
+                pktSeq = (ushort)((pktSeq + 1) % Constants.RtpCallEndSeq);
+                peer.SendMasterTraffic(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
 
-                    seqNo++;
-                    dmrN++;
-                }
+                seqNo++;
+                dmrN = n;
             }
 
             data = new byte[DMR_FRAME_LENGTH_BYTES];
@@ -444,7 +449,8 @@ namespace fnecore
             CreateDMRMessage(ref dmrpkt, callData, (byte)seqNo, 0);
             Buffer.BlockCopy(data, 0, dmrpkt, 20, DMR_FRAME_LENGTH_BYTES);
 
-            peer.SendMaster(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR), dmrpkt, pktSeq, callData.TxStreamID);
+            peer.SendMasterTraffic(new Tuple<byte, byte>(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_DMR),
+                dmrpkt, Constants.RtpCallEndSeq, callData.TxStreamID);
 
             seqNo = 0;
             dmrN = 0;
@@ -524,7 +530,7 @@ namespace fnecore
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
-            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
+            peer.SendMasterTraffic(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
         }
 
         /// <summary>
@@ -544,7 +550,7 @@ namespace fnecore
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
-            peer.SendMaster(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
+            peer.SendMasterTraffic(FneBase.CreateOpcode(Constants.NET_FUNC_PROTOCOL, Constants.NET_PROTOCOL_SUBFUNC_P25), payload, Constants.RtpCallEndSeq, callData.TxStreamID);
         }
     } // public abstract class FneSystemBase
 } // namespace fnecore

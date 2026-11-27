@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2026 Bryan Biedenkapp, N2PLL
 *   Copyright (C) 2024 Caleb, KO4UYJ
 *
 */
@@ -22,6 +22,7 @@ using System.Text;
 using System.Text.Json;
 using System.Linq;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 
 using fnecore.DMR;
 using fnecore.P25;
@@ -55,26 +56,39 @@ namespace fnecore
     /// <summary>
     /// Implements an FNE "peer".
     /// </summary>
-    public class FnePeer : FneBase
+    public partial class FnePeer : FneBase
     {
         private const int MAX_MISSED_PEER_PINGS = 5;
+        private const int MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH = 16;
+        private const int MIN_P25_MESSAGE_LENGTH = 23;
+        private const int RECONNECT_RETRY_MIN_MS = 1000;
+        private const int RECONNECT_RETRY_MAX_MS = 30000;
 
-        private UdpReceiver client = null;
+        private UdpReceiver clientTraffic = null;
+        private UdpReceiver clientMetadata = null;
 
         private bool abortListening = false;
 
-        private CancellationTokenSource listenCancelToken = new CancellationTokenSource();
-        private Task listenTask = null;
+        private readonly object reconnectLock = new object();
+        private bool trafficReconnectPending = false;
+        private bool metadataReconnectPending = false;
+
+        private CancellationTokenSource listenTrafficCancelToken = new CancellationTokenSource();
+        private Task listenTrafficTask = null;
+        private CancellationTokenSource listenMetadataCancelToken = new CancellationTokenSource();
+        private Task listenMetadataTask = null;
         private CancellationTokenSource maintainenceCancelToken = new CancellationTokenSource();
         private Task maintainenceTask = null;
 
         private PeerInformation info;
         private IPEndPoint masterEndpoint = null;
+        private IPEndPoint metadataEndpoint = null;
 
         private ushort currPktSeq = 0;
         private uint streamId = 0;
 
         private List<TalkgroupEntry> announcedTGs = new List<TalkgroupEntry>();
+        private readonly object haLock = new object();
         private List<PeerHAIPEntry> haIPs = new List<PeerHAIPEntry>();
         private int currentHAIP;
 
@@ -82,6 +96,21 @@ namespace fnecore
         private int maxRetryCount = Constants.MAX_RETRY_BEFORE_RECONNECT;
 
         private bool trafficLogging;
+
+        private byte[] kmfPresharedKey = null;
+
+        private readonly object keyInventoryLock = new object();
+        private readonly Dictionary<uint, PacketBuffer> keyInventoryPackets = new Dictionary<uint, PacketBuffer>();
+
+        private readonly object radioAliasSyncLock = new object();
+        private readonly Dictionary<uint, RadioAliasTransfer> radioAliasSyncPackets = new Dictionary<uint, RadioAliasTransfer>();
+        private readonly Queue<uint> recentRadioAliasStreams = new Queue<uint>();
+
+        private sealed class RadioAliasTransfer
+        {
+            public readonly PacketBuffer Buffer = new PacketBuffer(true, "Radio Alias Sync");
+            public ushort? LastBlock;
+        }
 
         /*
         ** Properties
@@ -162,7 +191,9 @@ namespace fnecore
         /// <param name="peerId"></param>
         /// <param name="address"></param>
         /// <param name="port"></param>
-        public FnePeer(string systemName, uint peerId, string address, int port, string PresharedKey = null, bool trafficLogging = false) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), PresharedKey)
+        /// <param name="presharedKey"></param>
+        /// <param name="trafficLogging"></param>
+        public FnePeer(string systemName, uint peerId, string address, int port, string presharedKey = null, bool trafficLogging = false) : this(systemName, peerId, new IPEndPoint(IPAddress.Parse(address), port), presharedKey)
         {
             this.trafficLogging = trafficLogging;
             /* stub */
@@ -174,13 +205,21 @@ namespace fnecore
         /// <param name="systemName"></param>
         /// <param name="peerId"></param>
         /// <param name="endpoint"></param>
-        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string PresharedKey = null, bool trafficLogging = false) : base(systemName, peerId)
+        /// <param name="presharedKey"></param>
+        /// <param name="trafficLogging"></param>
+        public FnePeer(string systemName, uint peerId, IPEndPoint endpoint, string presharedKey = null, bool trafficLogging = false) : base(systemName, peerId)
         {
             masterEndpoint = endpoint;
-            client = new UdpReceiver();
+            metadataEndpoint = new IPEndPoint(endpoint.Address, endpoint.Port + 1);
+            clientTraffic = new UdpReceiver();
+            clientMetadata = new UdpReceiver();
 
-            if (PresharedKey != null)
-                client.SetPresharedKey(FneUtils.ConvertHexStringToPresharedKey(PresharedKey));
+            if (presharedKey != null)
+            {
+                byte[] parsedPresharedKey = FneUtils.ConvertHexStringToPresharedKey(presharedKey);
+                clientTraffic.SetPresharedKey(parsedPresharedKey);
+                clientMetadata.SetPresharedKey(parsedPresharedKey);
+            }
 
             info = new PeerInformation();
             info.PeerID = peerId;
@@ -191,6 +230,37 @@ namespace fnecore
             PingsAcked = 0;
 
             this.trafficLogging = trafficLogging;
+        }
+
+        /// <summary>
+        /// Sets the KMF preshared key used to decrypt encrypted key material in KEY_RSP.
+        /// </summary>
+        /// <param name="presharedKey">32-byte preshared key.</param>
+        public void SetKMFPresharedKey(byte[] presharedKey)
+        {
+            if (presharedKey == null)
+            {
+                kmfPresharedKey = null;
+                return;
+            }
+
+            kmfPresharedKey = new byte[presharedKey.Length];
+            Buffer.BlockCopy(presharedKey, 0, kmfPresharedKey, 0, presharedKey.Length);
+        }
+
+        /// <summary>
+        /// Sets the KMF preshared key used to decrypt encrypted key material in KEY_RSP.
+        /// </summary>
+        /// <param name="presharedKeyHex">64-character hexadecimal key.</param>
+        public void SetKMFPresharedKey(string presharedKeyHex)
+        {
+            if (presharedKeyHex == null)
+            {
+                kmfPresharedKey = null;
+                return;
+            }
+
+            SetKMFPresharedKey(FneUtils.ConvertHexStringToPresharedKey(presharedKeyHex));
         }
 
         /// <summary>
@@ -206,7 +276,8 @@ namespace fnecore
             // attempt initial connection
             try
             {
-                client.Connect(masterEndpoint);
+                clientTraffic.Connect(masterEndpoint);
+                clientMetadata.Connect(metadataEndpoint);
             }
             catch (SocketException se)
             {
@@ -214,8 +285,39 @@ namespace fnecore
             }
 
             abortListening = false;
-            listenTask = Task.Factory.StartNew(Listen, listenCancelToken.Token);
+            listenTrafficTask = Task.Factory.StartNew(ListenTraffic, listenTrafficCancelToken.Token);
+            listenMetadataTask = Task.Factory.StartNew(ListenMetadata, listenMetadataCancelToken.Token);
             maintainenceTask = Task.Factory.StartNew(Maintainence, maintainenceCancelToken.Token);
+
+            isStarted = true;
+        }
+
+        /// <summary>
+        /// Starts the main execution loop for this <see cref="FnePeer"/> without starting the maintainence task.
+        /// </summary>
+        /// <remarks>Normally, the maintainence task is used to send periodic pings to the master. However, this method is 
+        /// useful for when the user wants to handle initial login and ping scheduling manually.</remarks>
+        public void StartWithoutMaintainence()
+        {
+            if (isStarted)
+                throw new InvalidOperationException("Cannot start listening when already started.");
+
+            Logger(LogLevel.INFO, $"({systemName}) starting network services, {masterEndpoint}");
+
+            // attempt initial connection
+            try
+            {
+                clientTraffic.Connect(masterEndpoint);
+                clientMetadata.Connect(metadataEndpoint);
+            }
+            catch (SocketException se)
+            {
+                Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
+            }
+
+            abortListening = false;
+            listenTrafficTask = Task.Factory.StartNew(ListenTraffic, listenTrafficCancelToken.Token);
+            listenMetadataTask = Task.Factory.StartNew(ListenMetadata, listenMetadataCancelToken.Token);
 
             isStarted = true;
         }
@@ -229,24 +331,48 @@ namespace fnecore
                 throw new InvalidOperationException("Cannot stop listening when not started.");
 
             Logger(LogLevel.INFO, $"({systemName}) stopping network services, {masterEndpoint}");
+            ClearRadioAliasSyncRequests();
 
-            // send shutdown opcode to server
-            SendMaster(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            // send shutdown opcode to server (best effort, the network may already be gone)
+            try
+            {
+                SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPT_CLOSING, Constants.NET_SUBFUNC_NOP), new byte[1], 1, CreateStreamID(), true);
+            }
+            catch (Exception ex) when (ex is SocketException || ex is InvalidOperationException)
+            {
+                Log(LogLevel.WARNING, $"({systemName}) Failed to send closing to {masterEndpoint}; {ex.Message}");
+            }
 
-            // stop UDP listen task
-            if (listenTask != null)
+            // stop UDP listen traffic task
+            if (listenTrafficTask != null)
             {
                 abortListening = true;
-                listenCancelToken.Cancel();
+                listenTrafficCancelToken.Cancel();
 
                 try
                 {
-                    listenTask.GetAwaiter().GetResult();
+                    listenTrafficTask.GetAwaiter().GetResult();
                 }
                 catch (OperationCanceledException) { /* stub */ }
                 finally
                 {
-                    listenCancelToken.Dispose();
+                    listenTrafficCancelToken.Dispose();
+                }
+            }
+
+            // stop UDP listen metadata task
+            if (listenMetadataTask != null)
+            {
+                listenMetadataCancelToken.Cancel();
+
+                try
+                {
+                    listenMetadataTask.GetAwaiter().GetResult();
+                }
+                catch (OperationCanceledException) { /* stub */ }
+                finally
+                {
+                    listenMetadataCancelToken.Dispose();
                 }
             }
 
@@ -266,19 +392,25 @@ namespace fnecore
                 }
             }
 
+            // close the sockets; the listen routines may be waiting on a receive that never
+            // completes if the network is gone
+            abortListening = true;
+            clientTraffic.Close();
+            clientMetadata.Close();
+
             isStarted = false;
         }
 
         /// <summary>
-        /// Helper to send a raw UDP frame.
+        /// Helper to send a raw UDP traffic frame.
         /// </summary>
         /// <param name="frame">UDP frame to send</param>
-        public void Send(UdpFrame frame)
+        public void SendTraffic(UdpFrame frame)
         {
             if (RawPacketTrace)
                 Log(LogLevel.DEBUG, $"({systemName}) Network Sent (to {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
 
-            client.Send(frame);
+            clientTraffic.Send(frame);
         }
 
         /// <summary>
@@ -289,14 +421,46 @@ namespace fnecore
         /// <param name="pktSeq">RTP Packet Sequence</param>
         /// <param name="streamId"></param>
         /// <param name="forceZeroStream"></param>
-        public void SendMaster(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
+        public void SendMasterTraffic(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
         {
             if (streamId == 0 && !forceZeroStream)
                 streamId = this.streamId;
 
-            Send(new UdpFrame()
+            SendTraffic(new UdpFrame()
             {
                 Endpoint = masterEndpoint,
+                Message = WriteFrame(message, peerId, this.peerId, opcode, pktSeq, streamId)
+            });
+        }
+
+        /// <summary>
+        /// Helper to send a raw UDP metadata frame.
+        /// </summary>
+        /// <param name="frame">UDP frame to send</param>
+        public void SendMetadata(UdpFrame frame)
+        {
+            if (RawPacketTrace)
+                Log(LogLevel.DEBUG, $"({systemName}) Network Sent (to {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
+
+            clientMetadata.Send(frame);
+        }
+
+        /// <summary>
+        /// Helper to send a metadata message to the master metadata endpoint.
+        /// </summary>
+        /// <param name="opcode">Opcode</param>
+        /// <param name="message">Byte array containing message to send</param>
+        /// <param name="pktSeq">RTP Packet Sequence</param>
+        /// <param name="streamId"></param>
+        /// <param name="forceZeroStream"></param>
+        public void SendMasterMetadata(Tuple<byte, byte> opcode, byte[] message, ushort pktSeq, uint streamId = 0, bool forceZeroStream = false)
+        {
+            if (streamId == 0 && !forceZeroStream)
+                streamId = this.streamId;
+
+            SendMetadata(new UdpFrame()
+            {
+                Endpoint = metadataEndpoint,
                 Message = WriteFrame(message, peerId, this.peerId, opcode, pktSeq, streamId)
             });
         }
@@ -306,9 +470,9 @@ namespace fnecore
         /// </summary>
         /// <param name="opcode">Opcode</param>
         /// <param name="message">Byte array containing message to send</param>
-        public void SendMaster(Tuple<byte, byte> opcode, byte[] message)
+        public void SendMasterTraffic(Tuple<byte, byte> opcode, byte[] message)
         {
-            SendMaster(opcode, message, pktSeq());
+            SendMasterTraffic(opcode, message, pktSeq());
         }
 
         /// <summary>
@@ -324,7 +488,7 @@ namespace fnecore
             FneUtils.Write3Bytes(srcId, ref res, 0);
             FneUtils.Write3Bytes(dstId, ref res, 3);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_AFFIL), res, 0, 0, true);
         }
 
         /// <summary>
@@ -347,7 +511,7 @@ namespace fnecore
                 offset += 8;
             }
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_AFFILS), buffer, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_AFFILS), buffer, 0, 0, true);
         }
 
         /// <summary>
@@ -361,7 +525,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_UNAFFIL), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_GRP_UNAFFIL), res, 0, 0, true);
         }
 
         /// <summary>
@@ -375,7 +539,7 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_REG), res, 0, 0, true);
         }
 
         /// <summary>
@@ -389,7 +553,152 @@ namespace fnecore
 
             FneUtils.Write3Bytes(srcId, ref res, 0);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_ANNOUNCE, Constants.NET_ANNC_SUBFUNC_UNIT_DEREG), res, 0, 0, true);
+        }
+
+        /// <summary>
+        /// Helper to request the master's radio alias list.
+        /// </summary>
+        /// <returns>Stream ID used for the request.</returns>
+        public uint SendMasterRadioAliasSync()
+        {
+            uint requestStreamId;
+            lock (radioAliasSyncLock)
+            {
+                if (!isStarted || info.State != ConnectionState.RUNNING)
+                    throw new InvalidOperationException("The peer must be connected before requesting radio aliases.");
+                do { requestStreamId = CreateStreamID(); }
+                while (requestStreamId == 0 || radioAliasSyncPackets.ContainsKey(requestStreamId) || recentRadioAliasStreams.Contains(requestStreamId));
+                radioAliasSyncPackets[requestStreamId] = new RadioAliasTransfer();
+                // Remember a bounded set of requests so a late NAK after cancellation cannot reset the peer.
+                recentRadioAliasStreams.Enqueue(requestStreamId);
+                if (recentRadioAliasStreams.Count > 32)
+                    recentRadioAliasStreams.Dequeue();
+            }
+
+            try
+            {
+                // The FNE frame reader rejects empty payloads, even for request-only opcodes.
+                SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_RADIO_ALIAS_SYNC, Constants.NET_SUBFUNC_NOP), new byte[1],
+                    Constants.RtpCallEndSeq, requestStreamId, false);
+            }
+            catch
+            {
+                CancelRadioAliasSync(requestStreamId);
+                throw;
+            }
+            return requestStreamId;
+        }
+
+        /// <summary>
+        /// Releases an alias request after caller cancellation or timeout; late fragments are ignored.
+        /// </summary>
+        /// <param name="requestStreamId">Stream ID returned by SendMasterRadioAliasSync.</param>
+        public void CancelRadioAliasSync(uint requestStreamId)
+        {
+            lock (radioAliasSyncLock)
+            {
+                if (radioAliasSyncPackets.Remove(requestStreamId, out RadioAliasTransfer transfer))
+                    transfer.Buffer.Clear();
+            }
+        }
+
+        /// <summary>
+        /// Releases incomplete transfers when the peer connection ends.
+        /// </summary>
+        private void ClearRadioAliasSyncRequests()
+        {
+            uint[] requests;
+            lock (radioAliasSyncLock)
+            {
+                requests = radioAliasSyncPackets.Keys.ToArray();
+                foreach (RadioAliasTransfer transfer in radioAliasSyncPackets.Values)
+                    transfer.Buffer.Clear();
+                radioAliasSyncPackets.Clear();
+            }
+            foreach (uint request in requests)
+                FireRadioAliasSyncFailed(new RadioAliasSyncFailedEvent(peerId, request,
+                    new IOException("Peer disconnected during radio alias sync.")));
+        }
+
+        /// <summary>
+        /// Processes alias replies without changing the active voice stream or packet sequence.
+        /// </summary>
+        private bool HandleRadioAliasSyncFrame(uint targetPeerId, uint responseStreamId, byte function, byte[] message)
+        {
+            if (function != Constants.NET_FUNC_RADIO_ALIAS_SYNC && function != Constants.NET_FUNC_NAK)
+                return false;
+
+            RadioAliasSyncEvent completed = null;
+            RadioAliasSyncFailedEvent failed = null;
+            lock (radioAliasSyncLock)
+            {
+                if (targetPeerId != peerId)
+                    return function == Constants.NET_FUNC_RADIO_ALIAS_SYNC;
+
+                // Explicit connection/ACL resets still belong to the normal peer state machine.
+                ConnectionMSTNAK reason = message.Length >= 12 ? (ConnectionMSTNAK)FneUtils.ToUInt16(message, 10) : ConnectionMSTNAK.INVALID;
+                if (function == Constants.NET_FUNC_NAK && (reason == ConnectionMSTNAK.PEER_RESET || reason == ConnectionMSTNAK.PEER_ACL))
+                    return false;
+                if (!radioAliasSyncPackets.TryGetValue(responseStreamId, out RadioAliasTransfer transfer))
+                    return function == Constants.NET_FUNC_RADIO_ALIAS_SYNC || recentRadioAliasStreams.Contains(responseStreamId);
+
+                if (function == Constants.NET_FUNC_NAK)
+                {
+                    failed = new RadioAliasSyncFailedEvent(peerId, responseStreamId,
+                        new IOException("The FNE rejected the radio alias request."));
+                }
+                else
+                {
+                    try
+                    {
+                        if (message.Length != PacketBuffer.FRAG_SIZE)
+                            throw new InvalidDataException("Invalid radio alias fragment.");
+
+                        uint size = FneUtils.ToUInt32(message, 0);
+                        uint compressed = FneUtils.ToUInt32(message, 4);
+                        bool extended = compressed > 256U * PacketBuffer.FRAG_BLOCK_SIZE;
+                        ushort block = extended ? FneUtils.ToUInt16(message, 8) : message[8];
+                        ushort lastBlock = extended ? FneUtils.ToUInt16(message, 10) : message[9];
+                        uint blockSize = (uint)(extended ? PacketBuffer.EXTENDED_FRAG_BLOCK_SIZE : PacketBuffer.FRAG_BLOCK_SIZE);
+                        uint blockCount = (uint)lastBlock + 1U;
+
+                        bool hasSizeMetadata = extended || block == 0;
+                        if (block > lastBlock || (!extended && block != 0 && (size != 0 || compressed != 0)) ||
+                            (hasSizeMetadata && (size == 0 || compressed == 0 || size > 8U * 1024U * 1024U || compressed > 8U * 1024U * 1024U ||
+                            compressed > blockCount * blockSize || compressed <= (blockCount - 1U) * blockSize)))
+                            throw new InvalidDataException("Invalid radio alias fragment.");
+                        if (transfer.LastBlock.HasValue && transfer.LastBlock != lastBlock)
+                            throw new InvalidDataException("Radio alias fragment count changed during transfer.");
+                        transfer.LastBlock = lastBlock;
+                        if (transfer.Buffer.Decode(message, out byte[] payload, out uint length))
+                            completed = new RadioAliasSyncEvent(peerId, responseStreamId, payload, length);
+                        else if (transfer.Buffer.Fragments.Count == 0)
+                            throw new InvalidDataException("Radio alias reassembly failed.");
+                    }
+                    catch (Exception ex)
+                    {
+                        failed = new RadioAliasSyncFailedEvent(peerId, responseStreamId,
+                            ex as InvalidDataException ?? new InvalidDataException("Invalid radio alias transfer.", ex));
+                    }
+                }
+
+                if (completed != null || failed != null)
+                {
+                    transfer.Buffer.Clear();
+                    radioAliasSyncPackets.Remove(responseStreamId);
+                }
+            }
+
+            // Application callbacks run outside the transfer lock.
+            if (completed != null)
+                FireRadioAliasSync(completed);
+            if (failed != null)
+            {
+                Log(LogLevel.WARNING, $"({systemName}) RADIO_ALIAS_SYNC stream {responseStreamId}: {failed.Error.Message}");
+                FireRadioAliasSyncFailed(failed);
+            }
+            return true;
         }
 
         /// <summary>
@@ -397,14 +706,16 @@ namespace fnecore
         /// </summary>
         /// <param name="algId"></param>
         /// <param name="kId"></param>
-        public void SendMasterKeyRequest(byte algId, ushort kId)
+        /// <param name="srcLLId"></param>
+        public void SendMasterKeyRequest(byte algId, ushort kId, uint srcLLId = 0)
         {
             byte[] res = new byte[32];
 
             KmmModifyKey modifyKey = new KmmModifyKey
             {
                 AlgId = algId,
-                KeyId = kId
+                KeyId = kId,
+                SrcLlId = srcLLId
             };
 
             KeysetItem ks = new KeysetItem
@@ -423,7 +734,155 @@ namespace fnecore
 
             Array.Copy(payload, 0, res, 11, payload.Length);
 
-            SendMaster(CreateOpcode(Constants.NET_FUNC_KEY_REQ, Constants.NET_SUBFUNC_NOP), res, Constants.RtpCallEndSeq, 0, true);
+            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_KEY_REQ, Constants.NET_SUBFUNC_NOP), res, Constants.RtpCallEndSeq, 0, true);
+        }
+
+        /// <summary>
+        /// Helper to send a key inventory request to the master.
+        /// </summary>
+        /// <param name="remoteAccessPassword">Remote access password configured on the FNE.</param>
+        /// <returns>Stream ID used for the request.</returns>
+        public uint SendMasterKeyInventoryRequest(string remoteAccessPassword)
+        {
+            if (string.IsNullOrEmpty(Passphrase))
+                throw new InvalidOperationException("Passphrase must be set before requesting key inventory.");
+
+            if (remoteAccessPassword == null)
+                throw new ArgumentNullException(nameof(remoteAccessPassword));
+
+            byte[] req = new byte[80];
+
+            byte[] peerSalt = new byte[4];
+            byte[] remoteSalt = new byte[4];
+            using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(peerSalt);
+                rng.GetBytes(remoteSalt);
+            }
+
+            byte[] peerPasswordBytes = Encoding.ASCII.GetBytes(Passphrase);
+            byte[] peerHashInput = new byte[peerSalt.Length + peerPasswordBytes.Length];
+            Buffer.BlockCopy(peerSalt, 0, peerHashInput, 0, peerSalt.Length);
+            Buffer.BlockCopy(peerPasswordBytes, 0, peerHashInput, peerSalt.Length, peerPasswordBytes.Length);
+            byte[] peerHash = FneUtils.sha256_hash(peerHashInput);
+
+            byte[] remotePasswordBytes = Encoding.ASCII.GetBytes(remoteAccessPassword);
+            byte[] remoteHashInput = new byte[remoteSalt.Length + remotePasswordBytes.Length];
+            Buffer.BlockCopy(remoteSalt, 0, remoteHashInput, 0, remoteSalt.Length);
+            Buffer.BlockCopy(remotePasswordBytes, 0, remoteHashInput, remoteSalt.Length, remotePasswordBytes.Length);
+            byte[] remoteHash = FneUtils.sha256_hash(remoteHashInput);
+
+            Buffer.BlockCopy(peerHash, 0, req, 8, 32);
+            Buffer.BlockCopy(peerSalt, 0, req, 40, 4);
+            Buffer.BlockCopy(remoteHash, 0, req, 44, 32);
+            Buffer.BlockCopy(remoteSalt, 0, req, 76, 4);
+
+            uint requestStreamId = CreateStreamID();
+            SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_KEYS_INVENTORY, Constants.NET_SUBFUNC_NOP), req,
+                Constants.RtpCallEndSeq, requestStreamId, false);
+
+            return requestStreamId;
+        }
+
+        /// <summary>
+        /// Helper to send a key update request and stream a chunked key container to the master.
+        /// </summary>
+        /// <param name="keyContainer">Raw key container bytes.</param>
+        /// <param name="remoteAccessPassword">Remote access password configured on the FNE.</param>
+        /// <param name="paceMs">Inter-fragment pacing in milliseconds.</param>
+        /// <returns>Stream ID used for the request/transfer.</returns>
+        public uint SendMasterKeyUpdateRequest(byte[] keyContainer, string remoteAccessPassword, int paceMs = 60)
+        {
+            if (keyContainer == null)
+                throw new ArgumentNullException(nameof(keyContainer));
+
+            if (keyContainer.Length == 0)
+                throw new ArgumentException("Key container cannot be empty.", nameof(keyContainer));
+
+            if (string.IsNullOrEmpty(Passphrase))
+                throw new InvalidOperationException("Passphrase must be set before requesting key update.");
+
+            if (remoteAccessPassword == null)
+                throw new ArgumentNullException(nameof(remoteAccessPassword));
+
+            // Phase 1: authenticate key update request.
+            byte[] authReq = new byte[80];
+
+            byte[] peerSalt = new byte[4];
+            byte[] remoteSalt = new byte[4];
+            using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(peerSalt);
+                rng.GetBytes(remoteSalt);
+            }
+
+            byte[] peerPasswordBytes = Encoding.ASCII.GetBytes(Passphrase);
+            byte[] peerHashInput = new byte[peerSalt.Length + peerPasswordBytes.Length];
+            Buffer.BlockCopy(peerSalt, 0, peerHashInput, 0, peerSalt.Length);
+            Buffer.BlockCopy(peerPasswordBytes, 0, peerHashInput, peerSalt.Length, peerPasswordBytes.Length);
+            byte[] peerHash = FneUtils.sha256_hash(peerHashInput);
+
+            byte[] remotePasswordBytes = Encoding.ASCII.GetBytes(remoteAccessPassword);
+            byte[] remoteHashInput = new byte[remoteSalt.Length + remotePasswordBytes.Length];
+            Buffer.BlockCopy(remoteSalt, 0, remoteHashInput, 0, remoteSalt.Length);
+            Buffer.BlockCopy(remotePasswordBytes, 0, remoteHashInput, remoteSalt.Length, remotePasswordBytes.Length);
+            byte[] remoteHash = FneUtils.sha256_hash(remoteHashInput);
+
+            Buffer.BlockCopy(peerHash, 0, authReq, 8, 32);
+            Buffer.BlockCopy(peerSalt, 0, authReq, 40, 4);
+            Buffer.BlockCopy(remoteHash, 0, authReq, 44, 32);
+            Buffer.BlockCopy(remoteSalt, 0, authReq, 76, 4);
+
+            uint requestStreamId = CreateStreamID();
+            SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), authReq,
+                Constants.RtpCallEndSeq, requestStreamId, false);
+
+            // Phase 2: send compressed/chunked key container payload.
+            PacketBuffer pkt = new PacketBuffer(true, "Remote EKC, Key Update");
+            pkt.Encode(keyContainer);
+
+            foreach (var fragment in pkt.Fragments.OrderBy(x => x.Key))
+            {
+                SendMasterMetadata(CreateOpcode(Constants.NET_FUNC_KEYS_UPDATE, Constants.NET_SUBFUNC_NOP), fragment.Value.Data,
+                    0, requestStreamId, false);
+
+                if (paceMs > 0)
+                    Thread.Sleep(paceMs);
+            }
+
+            pkt.Clear();
+            return requestStreamId;
+        }
+
+        /// <summary>
+        /// Decrypts encrypted key material using the configured KMF preshared key.
+        /// </summary>
+        /// <param name="encryptedKey">Encrypted key material.</param>
+        /// <param name="presharedKey">KMF preshared key.</param>
+        /// <returns>Decrypted key material.</returns>
+        private static byte[] DecryptPeerEncryptedKey(byte[] encryptedKey, byte[] presharedKey)
+        {
+            if (encryptedKey == null)
+                throw new ArgumentNullException(nameof(encryptedKey));
+            if (presharedKey == null)
+                throw new ArgumentNullException(nameof(presharedKey));
+
+            byte[] paddedEncryptedKey = new byte[32];
+            Buffer.BlockCopy(encryptedKey, 0, paddedEncryptedKey, 0, Math.Min(encryptedKey.Length, paddedEncryptedKey.Length));
+
+            using (Aes aes = Aes.Create())
+            {
+                aes.KeySize = 256;
+                aes.BlockSize = 128;
+                aes.Mode = CipherMode.ECB;
+                aes.Padding = PaddingMode.None;
+                aes.Key = presharedKey;
+
+                using (ICryptoTransform decryptor = aes.CreateDecryptor())
+                {
+                    return decryptor.TransformFinalBlock(paddedEncryptedKey, 0, paddedEncryptedKey.Length);
+                }
+            }
         }
 
         /// <summary>
@@ -448,44 +907,195 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to reconnect a UDP socket from within a listen or maintainence routine.
+        /// </summary>
+        /// <remarks>The listen and maintainence routines are async void, an exception thrown here would
+        /// terminate the process; instead a failed reconnect is retried, with backoff, until it succeeds or
+        /// the peer is stopped.</remarks>
+        /// <param name="client">UDP socket to reconnect</param>
+        /// <param name="endpoint">Endpoint to reconnect to</param>
+        private void TryReconnect(UdpReceiver client, IPEndPoint endpoint)
+        {
+            // stopping; the socket was closed on purpose
+            if (abortListening)
+                return;
+
+            // a retry already owns this socket
+            lock (reconnectLock)
+            {
+                if (client == clientTraffic ? trafficReconnectPending : metadataReconnectPending)
+                    return;
+            }
+
+            if (!ConnectSocket(client, endpoint))
+                RetryReconnect(client);
+        }
+
+        /// <summary>
+        /// Helper to connect a UDP socket.
+        /// </summary>
+        /// <param name="client">UDP socket to connect</param>
+        /// <param name="endpoint">Endpoint to connect to</param>
+        /// <returns>True, if the socket connected or was closed by <see cref="Stop"/>, otherwise false.</returns>
+        private bool ConnectSocket(UdpReceiver client, IPEndPoint endpoint)
+        {
+            try
+            {
+                client.Connect(endpoint);
+                return true;
+            }
+            catch (SocketException se)
+            {
+                Log(LogLevel.ERROR, $"({systemName}) Failed to reconnect to {endpoint}; {se.SocketErrorCode}; {se.Message}");
+                return false;
+            }
+            catch (ObjectDisposedException)
+            {
+                // closed by Stop(); nothing to retry
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Internal routine to retry a failed reconnect until it succeeds or the peer is stopped, waiting
+        /// <see cref="RECONNECT_RETRY_MIN_MS"/> before the first attempt and doubling the wait after each
+        /// failure, up to <see cref="RECONNECT_RETRY_MAX_MS"/>.
+        /// </summary>
+        /// <param name="client">UDP socket to reconnect</param>
+        private async void RetryReconnect(UdpReceiver client)
+        {
+            bool traffic = client == clientTraffic;
+            lock (reconnectLock)
+            {
+                if (traffic ? trafficReconnectPending : metadataReconnectPending)
+                    return;
+
+                if (traffic)
+                    trafficReconnectPending = true;
+                else
+                    metadataReconnectPending = true;
+            }
+
+            try
+            {
+                int delay = RECONNECT_RETRY_MIN_MS;
+                while (!abortListening)
+                {
+                    Log(LogLevel.WARNING, $"({systemName}) Retrying reconnect in {delay / 1000}s");
+                    await Task.Delay(delay);
+                    if (abortListening)
+                        break;
+
+                    // re-read the endpoint each attempt, the master may have rotated to another HA endpoint
+                    IPEndPoint endpoint = traffic ? masterEndpoint : metadataEndpoint;
+                    if (ConnectSocket(client, endpoint))
+                    {
+                        Log(LogLevel.INFO, $"({systemName}) Reconnected to {endpoint}");
+                        break;
+                    }
+
+                    delay = Math.Min(delay * 2, RECONNECT_RETRY_MAX_MS);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.ERROR, $"({systemName}) Reconnect retry failed; {ex.Message}");
+            }
+            finally
+            {
+                lock (reconnectLock)
+                {
+                    if (traffic)
+                        trafficReconnectPending = false;
+                    else
+                        metadataReconnectPending = false;
+                }
+            }
+        }
+
+        /// <summary>
         /// Helper to rotate the master endpoint to the next HA endpoint.
         /// </summary>
         private void RotateMasterEndpont()
         {
-            // are we rotating IPs for HA reconnect?
-            if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
+            ClearRadioAliasSyncRequests();
+
+            // the listen and maintainence routines may rotate at the same time, and HA parameters from the
+            // master may replace the HA IP list mid-rotation
+            lock (haLock)
             {
-
-                PeerHAIPEntry entry = haIPs[currentHAIP];
-                currentHAIP++;
-
-                if (currentHAIP > haIPs.Count)
+                // are we rotating IPs for HA reconnect?
+                if (haIPs.Count() > 0 && retryCount > 0U && maxRetryCount == Constants.MAX_RETRY_HA_RECONNECT)
                 {
-                    currentHAIP = 0;
+
+                    PeerHAIPEntry entry = haIPs[currentHAIP];
+                    currentHAIP++;
+
+                    if (currentHAIP >= haIPs.Count)
+                    {
+                        currentHAIP = 0;
+                    }
+
+                    Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
+                    masterEndpoint = entry.EndPoint;
+                    metadataEndpoint = new IPEndPoint(masterEndpoint.Address, masterEndpoint.Port + 1);
                 }
 
-                Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; trying next HA {entry.EndPoint}...");
-                masterEndpoint = entry.EndPoint;
+                ++retryCount;
             }
-
-            ++retryCount;
         }
 
         /// <summary>
-        /// Internal UDP listen routine.
+        /// Helper to determine the DMR data type from the DMR packet flags.
         /// </summary>
-        private async void Listen()
+        /// <param name="bits">DMR packet flags.</param>
+        /// <returns></returns>
+        private static DMRDataType GetDMRDataType(byte bits)
         {
-            CancellationToken ct = listenCancelToken.Token;
+            if ((bits & 0x20) == 0x20)
+                return (DMRDataType)(bits & 0x0F);
+
+            return DMRDataType.IDLE;
+        }
+
+        /// <summary>
+        /// Helper to validate the minimum payload length for a protocol packet.
+        /// </summary>
+        /// <param name="subFunction">Protocol sub-function.</param>
+        /// <param name="messageLength">Payload message length.</param>
+        /// <returns></returns>
+        private static bool IsProtocolPayloadLengthValid(byte subFunction, int messageLength)
+        {
+            switch (subFunction)
+            {
+                case Constants.NET_PROTOCOL_SUBFUNC_DMR:
+                case Constants.NET_PROTOCOL_SUBFUNC_NXDN:
+                case Constants.NET_PROTOCOL_SUBFUNC_ANALOG:
+                    return messageLength >= MIN_DMR_NXDN_ANALOG_MESSAGE_LENGTH;
+
+                case Constants.NET_PROTOCOL_SUBFUNC_P25:
+                    return messageLength >= MIN_P25_MESSAGE_LENGTH;
+
+                default:
+                    return true;
+            }
+        }
+
+        /// <summary>
+        /// Internal UDP listen traffic routine.
+        /// </summary>
+        private async void ListenTraffic()
+        {
+            CancellationToken ct = listenTrafficCancelToken.Token;
             ct.ThrowIfCancellationRequested();
 
             while (!abortListening)
             {
                 try
                 {
-                    UdpFrame frame = await client.Receive();
+                    UdpFrame frame = await clientTraffic.Receive();
                     if (RawPacketTrace)
-                        Log(LogLevel.DEBUG, $"Network Received (from {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
+                        Log(LogLevel.DEBUG, $"Traffic Network Received (from {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
 
                     // decode RTP frame
                     if (frame.Message.Length <= 0)
@@ -507,10 +1117,13 @@ namespace fnecore
                         continue;
                     }
 
-                    // validate frame endpoint
+                    // validate frame endpoint (traffic or metadata channel)
                     if (frame.Endpoint.ToString() == masterEndpoint.ToString())
                     {
                         uint peerId = fneHeader.PeerID;
+
+                        if (HandleRadioAliasSyncFrame(peerId, fneHeader.StreamID, fneHeader.Function, message))
+                            continue;
 
                         if (streamId != fneHeader.StreamID)
                             pktSeq(true);
@@ -537,6 +1150,13 @@ namespace fnecore
                                         break;
                                     }
 
+                                    if (!IsProtocolPayloadLengthValid(fneHeader.SubFunction, message.Length))
+                                    {
+                                        Log(LogLevel.WARNING, $"({systemName}) Malformed protocol packet (from {frame.Endpoint}); " +
+                                            $"payload is too short for sub-function {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
+                                        break;
+                                    }
+
                                     if (fneHeader.SubFunction == Constants.NET_PROTOCOL_SUBFUNC_DMR)            // Encapsulated DMR data frame
                                     {
                                         if (peerId != this.peerId)
@@ -559,9 +1179,7 @@ namespace fnecore
                                             CallType callType = ((bits & 0x40) == 0x40) ? CallType.PRIVATE : CallType.GROUP;
                                             FrameType frameType = (FrameType)((bits & 0x30) >> 4);
 
-                                            DMRDataType dataType = DMRDataType.IDLE;
-                                            if ((bits & 0x20) == 0x20)
-                                                dataType = (DMRDataType)(bits & ~(0x20));
+                                            DMRDataType dataType = GetDMRDataType(bits);
 
                                             byte n = (byte)(bits & 0xF);
 #if DEBUG
@@ -737,31 +1355,34 @@ namespace fnecore
 
                                             case Constants.NET_MASTER_SUBFUNC_HA_PARAMS:                    // HA Parameters
                                                 {
-                                                    haIPs.Clear();
-                                                    currentHAIP = 0;
-                                                    maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
-
-                                                    // always add the configured address to the HA IP list
-                                                    haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
-
-                                                    uint len = FneUtils.ToUInt32(message, 6);
-                                                    if (len > 0)
-                                                        len /= Constants.HAParamsEntryLen;
-
-                                                    int offs = 10;
-                                                    for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                    lock (haLock)
                                                     {
-                                                        uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
-                                                        ushort port = FneUtils.ToUInt16(message, offs + 8);
+                                                        haIPs.Clear();
+                                                        currentHAIP = 0;
+                                                        maxRetryCount = Constants.MAX_RETRY_HA_RECONNECT;
 
-                                                        IPAddress address = new IPAddress(ipAddr);
-                                                        haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
-                                                    }
+                                                        // always add the configured address to the HA IP list
+                                                        haIPs.Add(new PeerHAIPEntry(masterEndpoint.Address.ToString(), masterEndpoint.Port));
 
-                                                    if (haIPs.Count > 1)
-                                                    {
-                                                        currentHAIP = 1;
-                                                        Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                        uint len = FneUtils.ToUInt32(message, 6);
+                                                        if (len > 0)
+                                                            len /= Constants.HAParamsEntryLen;
+
+                                                        int offs = 10;
+                                                        for (int i = 0; i < len; i++, offs += (int)Constants.HAParamsEntryLen)
+                                                        {
+                                                            uint ipAddr = FneUtils.ToUInt32(message, offs + 4);
+                                                            ushort port = FneUtils.ToUInt16(message, offs + 8);
+
+                                                            IPAddress address = new IPAddress(ipAddr);
+                                                            haIPs.Add(new PeerHAIPEntry(address.ToString(), port));
+                                                        }
+
+                                                        if (haIPs.Count > 1)
+                                                        {
+                                                            currentHAIP = 1;
+                                                            Log(LogLevel.INFO, $"Loaded {haIPs.Count} HA IPs from master");
+                                                        }
                                                     }
                                                 }
                                                 break;
@@ -770,6 +1391,31 @@ namespace fnecore
                                                 Log(LogLevel.ERROR, $"({systemName}) Unknown master opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
                                                 break;
                                         }
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_MST_CLOSING:                                            // Master Closing (Disconnect)
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        info.State = ConnectionState.WAITING_LOGIN;
+                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTCL received");
+                                        ClearRadioAliasSyncRequests();
+
+                                        // userland actions
+                                        if (PeerDisconnected != null)
+                                            PeerDisconnected(peerId);
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_PONG:                                                   // Master Ping Response
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        PingsAcked++;
+                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTPONG received, pongs since connected {PingsAcked}");
                                     }
                                 }
                                 break;
@@ -827,6 +1473,226 @@ namespace fnecore
                                 }
                                 break;
 
+                            case Constants.NET_FUNC_KEY_RSP:                                               // Key Response
+                                if (this.peerId == peerId)
+                                {
+                                    byte[] payload = message.Skip(11).ToArray();
+
+                                    byte messageId = payload[0];
+
+                                    if (messageId == (byte)KmmMessageType.MODIFY_KEY_CMD)
+                                    {
+                                        KmmModifyKey modifyKey = new KmmModifyKey();
+                                        modifyKey.Decode(payload);
+
+                                        if (modifyKey.AlgId > 0 && modifyKey.KeysetItem.Keys.Count > 0)
+                                        {
+                                            KeyItem firstKey = modifyKey.KeysetItem.Keys[0];
+                                            Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId}, master reported enc. key, algId = ${modifyKey.KeysetItem.AlgId:X2}, kID = ${firstKey.KeyId:X4}");
+
+                                            if (modifyKey.DecryptInfoFmt == P25Defines.KMM_DECRYPT_PEER_ENC)
+                                            {
+                                                if (kmfPresharedKey != null)
+                                                {
+                                                    byte[] decryptedKey = DecryptPeerEncryptedKey(firstKey.GetKey(), kmfPresharedKey);
+
+                                                    int keyLength = 32;
+                                                    switch (modifyKey.KeysetItem.AlgId)
+                                                    {
+                                                        case NXDN.NXDNCrypto.Ehr:
+                                                            keyLength = NXDN.NXDNCrypto.KeyBytes(NXDN.NXDNCrypto.Ehr);
+                                                            break;
+                                                        case P25Defines.P25_ALGO_DES:
+                                                            keyLength = 8;
+                                                            break;
+                                                        case P25Defines.P25_ALGO_ARC4:
+                                                            keyLength = 5;
+                                                            break;
+
+                                                        case P25Defines.P25_ALGO_AES:
+                                                        default:
+                                                            keyLength = 32;
+                                                            break;
+                                                    }
+
+                                                    if (modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_DES &&
+                                                        modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_ARC4 &&
+                                                        modifyKey.KeysetItem.AlgId != NXDN.NXDNCrypto.Ehr &&
+                                                        modifyKey.KeysetItem.AlgId != P25Defines.P25_ALGO_AES)
+                                                        Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId}, unknown algorithm ID ${modifyKey.KeysetItem.AlgId:X2}, unable to determine key length");
+
+                                                    try
+                                                    {
+                                                        // EHR occupies two bytes in the peer-encrypted 32-byte block.
+                                                        // Reject malformed padding instead of silently truncating it.
+                                                        if (modifyKey.KeysetItem.AlgId == NXDN.NXDNCrypto.Ehr &&
+                                                            (decryptedKey.Length != 32 || decryptedKey.Skip(keyLength).Any(value => value != 0)))
+                                                        {
+                                                            Log(LogLevel.WARNING, $"({systemName}) PEER {this.peerId}, invalid NXDN EHR key padding; ignoring key response");
+                                                            break;
+                                                        }
+                                                        firstKey.SetKey(decryptedKey.Take(keyLength).ToArray(), (uint)keyLength);
+                                                        modifyKey.KeysetItem.KeyLength = (byte)keyLength;
+                                                    }
+                                                    finally
+                                                    {
+                                                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(decryptedKey);
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId}, received encrypted enc. key, but no preshared key available, algId = ${modifyKey.KeysetItem.AlgId:X2}, kID = ${firstKey.KeyId:X4}");
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        FireKeyResponse(new KeyResponseEvent(messageId, modifyKey, message));
+                                    }
+                                    else
+                                    {
+                                        Log(LogLevel.WARNING, $"Unknown KEY_RSP Message ID: {messageId}");
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_ACK:                                                    // Repeater ACK
+                                {
+                                    if (info.State == ConnectionState.WAITING_LOGIN)                        // Repeater Login
+                                    {
+                                        uint salt = FneUtils.ToUInt32(message, 6);
+                                        Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} login ACK received with ID {salt}");
+
+                                        info.Salt = salt;
+
+                                        // calculate our own hash
+                                        byte[] inBuf = new byte[4 + Passphrase.Length];
+                                        FneUtils.WriteBytes(info.Salt, ref inBuf, 0);
+                                        FneUtils.StringToBytes(Passphrase, inBuf, 4, Passphrase.Length);
+                                        byte[] calcHash = FneUtils.sha256_hash(inBuf);
+
+                                        // send message to master
+                                        byte[] res = new byte[calcHash.Length + 8];
+                                        FneUtils.StringToBytes(Constants.TAG_REPEATER_AUTH, res, 0, 4);
+                                        FneUtils.WriteBytes(peerId, ref res, 4);
+                                        Buffer.BlockCopy(calcHash, 0, res, 8, calcHash.Length);
+                                        SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPTK), res);
+
+                                        info.State = ConnectionState.WAITING_AUTHORISATION;
+                                    }
+                                    else if (info.State == ConnectionState.WAITING_AUTHORISATION)           // Repeater Authorization
+                                    {
+                                        if (this.peerId == peerId)
+                                        {
+                                            string json = string.Empty;
+                                            using (MemoryStream stream = new MemoryStream())
+                                            {
+                                                using (Utf8JsonWriter jsonWriter = new Utf8JsonWriter(stream))
+                                                {
+                                                    jsonWriter.WriteStartObject();
+
+                                                    // identity
+                                                    jsonWriter.WriteString("identity", info.Details.Identity);
+                                                    jsonWriter.WriteNumber("rxFrequency", info.Details.RxFrequency);
+                                                    jsonWriter.WriteNumber("txFrequency", info.Details.TxFrequency);
+
+                                                    // system info
+                                                    {
+                                                        jsonWriter.WritePropertyName("info");
+                                                        jsonWriter.WriteStartObject();
+
+                                                        jsonWriter.WriteNumber("latitude", info.Details.Latitude);
+                                                        jsonWriter.WriteNumber("longitude", info.Details.Longitude);
+                                                        jsonWriter.WriteNumber("height", info.Details.Height);
+                                                        jsonWriter.WriteString("location", info.Details.Location);
+
+                                                        jsonWriter.WriteEndObject();
+                                                    }
+
+                                                    // channel data
+                                                    {
+                                                        jsonWriter.WritePropertyName("channel");
+                                                        jsonWriter.WriteStartObject();
+
+                                                        jsonWriter.WriteNumber("txPower", info.Details.TxPower);
+                                                        jsonWriter.WriteNumber("txOffsetMhz", (double)info.Details.TxOffsetMhz);
+                                                        jsonWriter.WriteNumber("chBandwidthKhz", (double)info.Details.ChBandwidthKhz);
+                                                        jsonWriter.WriteNumber("channelId", info.Details.ChannelID);
+                                                        jsonWriter.WriteNumber("channelNo", info.Details.ChannelNo);
+
+                                                        jsonWriter.WriteEndObject();
+                                                    }
+
+                                                    // RCON
+                                                    {
+                                                        jsonWriter.WritePropertyName("rcon");
+                                                        jsonWriter.WriteStartObject();
+
+                                                        jsonWriter.WriteString("password", info.Details.Password);
+                                                        jsonWriter.WriteNumber("port", info.Details.Port);
+
+                                                        jsonWriter.WriteEndObject();
+                                                    }
+
+                                                    // peer class
+                                                    {
+                                                        jsonWriter.WriteNumber("peerClass", (int)info.Details.PeerClass);
+
+                                                        /*
+                                                        ** [deprecated] bryanb: this shit will need to be removed for R05A06 core
+                                                        */
+                                                        jsonWriter.WriteBoolean("externalPeer", info.Details.ExternalPeer);
+                                                        jsonWriter.WriteBoolean("conventionalPeer", info.Details.ConventionalPeer);
+                                                        jsonWriter.WriteBoolean("sysView", info.Details.SysView);
+                                                    }
+
+                                                    jsonWriter.WriteString("software", info.Details.Software);
+
+                                                    jsonWriter.WriteEndObject();
+                                                }
+
+                                                json = Encoding.UTF8.GetString(stream.ToArray());
+                                            }
+
+                                            // send message to master
+                                            byte[] res = new byte[json.Length + 8];
+                                            FneUtils.StringToBytes(Constants.TAG_REPEATER_CONFIG, res, 0, 4);
+                                            FneUtils.WriteBytes(peerId, ref res, 4);
+                                            FneUtils.StringToBytes(json, res, 8, json.Length);
+                                            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPTC), res);
+
+                                            info.State = ConnectionState.WAITING_CONFIG;
+                                        }
+                                        else
+                                        {
+                                            info.State = ConnectionState.WAITING_LOGIN;
+                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master ACK contained wrong ID - connection reset");
+                                        }
+                                    }
+                                    else if (info.State == ConnectionState.WAITING_CONFIG)                  // Repeater Configuration
+                                    {
+                                        if (this.peerId == peerId)
+                                        {
+                                            info.State = ConnectionState.RUNNING;
+                                            Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
+
+                                            this.streamId = 0;
+                                            lock (haLock)
+                                            {
+                                                retryCount = 0; // reset retry count
+                                            }
+
+                                            // userland actions
+                                            FirePeerConnected(new PeerConnectedEvent(peerId, info));
+                                        }
+                                        else
+                                        {
+                                            info.State = ConnectionState.WAITING_LOGIN;
+                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master ACK contained wrong ID - connection reset");
+                                        }
+                                    }
+                                }
+                                break;
                             case Constants.NET_FUNC_NAK:                                                    // Master NAK
                                 {
                                     if (this.peerId == peerId)
@@ -881,6 +1747,7 @@ namespace fnecore
                                             PingsSent = 0;
                                             PingsAcked = 0;
                                             info.State = ConnectionState.WAITING_LOGIN;
+                                            ClearRadioAliasSyncRequests();
                                         }
                                         else
                                         {
@@ -890,179 +1757,15 @@ namespace fnecore
                                             PingsSent = 0;
                                             PingsAcked = 0;
                                             info.State = ConnectionState.WAITING_LOGIN;
+                                            ClearRadioAliasSyncRequests();
                                             break;
                                         }
                                     }
                                 }
                                 break;
-                            case Constants.NET_FUNC_ACK:                                                    // Repeater ACK
-                                {
-                                    if (info.State == ConnectionState.WAITING_LOGIN)                        // Repeater Login
-                                    {
-                                        uint salt = FneUtils.ToUInt32(message, 6);
-                                        Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} login ACK received with ID {salt}");
 
-                                        info.Salt = salt;
-
-                                        // calculate our own hash
-                                        byte[] inBuf = new byte[4 + Passphrase.Length];
-                                        FneUtils.WriteBytes(info.Salt, ref inBuf, 0);
-                                        FneUtils.StringToBytes(Passphrase, inBuf, 4, Passphrase.Length);
-                                        byte[] calcHash = FneUtils.sha256_hash(inBuf);
-
-                                        // send message to master
-                                        byte[] res = new byte[calcHash.Length + 8];
-                                        FneUtils.StringToBytes(Constants.TAG_REPEATER_AUTH, res, 0, 4);
-                                        FneUtils.WriteBytes(peerId, ref res, 4);
-                                        Buffer.BlockCopy(calcHash, 0, res, 8, calcHash.Length);
-                                        SendMaster(CreateOpcode(Constants.NET_FUNC_RPTK), res);
-
-                                        info.State = ConnectionState.WAITING_AUTHORISATION;
-                                    }
-                                    else if (info.State == ConnectionState.WAITING_AUTHORISATION)           // Repeater Authorization
-                                    {
-                                        if (this.peerId == peerId)
-                                        {
-                                            string json = string.Empty;
-                                            using (MemoryStream stream = new MemoryStream())
-                                            {
-                                                using (Utf8JsonWriter jsonWriter = new Utf8JsonWriter(stream))
-                                                {
-                                                    jsonWriter.WriteStartObject();
-
-                                                    // identity
-                                                    jsonWriter.WriteString("identity", info.Details.Identity);
-                                                    jsonWriter.WriteNumber("rxFrequency", info.Details.RxFrequency);
-                                                    jsonWriter.WriteNumber("txFrequency", info.Details.TxFrequency);
-
-                                                    // peer types
-                                                    jsonWriter.WriteBoolean("externalPeer", info.Details.ExternalPeer);
-                                                    jsonWriter.WriteBoolean("conventionalPeer", info.Details.ConventionalPeer);
-                                                    jsonWriter.WriteBoolean("sysView", info.Details.SysView);
-
-                                                    // system info
-                                                    {
-                                                        jsonWriter.WritePropertyName("info");
-                                                        jsonWriter.WriteStartObject();
-
-                                                        jsonWriter.WriteNumber("latitude", info.Details.Latitude);
-                                                        jsonWriter.WriteNumber("longitude", info.Details.Longitude);
-                                                        jsonWriter.WriteNumber("height", info.Details.Height);
-                                                        jsonWriter.WriteString("location", info.Details.Location);
-
-                                                        jsonWriter.WriteEndObject();
-                                                    }
-
-                                                    // channel data
-                                                    {
-                                                        jsonWriter.WritePropertyName("channel");
-                                                        jsonWriter.WriteStartObject();
-
-                                                        jsonWriter.WriteNumber("txPower", info.Details.TxPower);
-                                                        jsonWriter.WriteNumber("txOffsetMhz", (double)info.Details.TxOffsetMhz);
-                                                        jsonWriter.WriteNumber("chBandwidthKhz", (double)info.Details.ChBandwidthKhz);
-                                                        jsonWriter.WriteNumber("channelId", info.Details.ChannelID);
-                                                        jsonWriter.WriteNumber("channelNo", info.Details.ChannelNo);
-
-                                                        jsonWriter.WriteEndObject();
-                                                    }
-
-                                                    // RCON
-                                                    {
-                                                        jsonWriter.WritePropertyName("rcon");
-                                                        jsonWriter.WriteStartObject();
-
-                                                        jsonWriter.WriteString("password", info.Details.Password);
-                                                        jsonWriter.WriteNumber("port", info.Details.Port);
-
-                                                        jsonWriter.WriteEndObject();
-                                                    }
-
-                                                    jsonWriter.WriteString("software", info.Details.Software);
-
-                                                    jsonWriter.WriteEndObject();
-                                                }
-
-                                                json = Encoding.UTF8.GetString(stream.ToArray());
-                                            }
-
-                                            // send message to master
-                                            byte[] res = new byte[json.Length + 8];
-                                            FneUtils.StringToBytes(Constants.TAG_REPEATER_CONFIG, res, 0, 4);
-                                            FneUtils.WriteBytes(peerId, ref res, 4);
-                                            FneUtils.StringToBytes(json, res, 8, json.Length);
-                                            SendMaster(CreateOpcode(Constants.NET_FUNC_RPTC), res);
-
-                                            info.State = ConnectionState.WAITING_CONFIG;
-                                        }
-                                        else
-                                        {
-                                            info.State = ConnectionState.WAITING_LOGIN;
-                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master ACK contained wrong ID - connection reset");
-                                        }
-                                    }
-                                    else if (info.State == ConnectionState.WAITING_CONFIG)                  // Repeater Configuration
-                                    {
-                                        if (this.peerId == peerId)
-                                        {
-                                            info.State = ConnectionState.RUNNING;
-                                            Log(LogLevel.INFO, $"({systemName}) PEER {this.peerId} connection to MASTER completed");
-
-                                            this.streamId = 0;
-                                            retryCount = 0; // reset retry count
-
-                                            // userland actions
-                                            FirePeerConnected(new PeerConnectedEvent(peerId, info));
-                                        }
-                                        else
-                                        {
-                                            info.State = ConnectionState.WAITING_LOGIN;
-                                            Log(LogLevel.ERROR, $"({systemName}) PEER {this.peerId} master ACK contained wrong ID - connection reset");
-                                        }
-                                    }
-                                }
-                                break;
-                            case Constants.NET_FUNC_MST_CLOSING:                                            // Master Closing (Disconnect)
-                                {
-                                    if (this.peerId == peerId)
-                                    {
-                                        info.State = ConnectionState.WAITING_LOGIN;
-                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTCL received");
-
-                                        // userland actions
-                                        if (PeerDisconnected != null)
-                                            PeerDisconnected(peerId);
-                                    }
-                                }
-                                break;
-                            case Constants.NET_FUNC_PONG:                                                   // Master Ping Response
-                                {
-                                    if (this.peerId == peerId)
-                                    {
-                                        PingsAcked++;
-                                        Log(LogLevel.DEBUG, $"({systemName}) PEER {this.peerId} MSTPONG received, pongs since connected {PingsAcked}");
-                                    }
-                                }
-                                break;
-                            case Constants.NET_FUNC_KEY_RSP:                                               // Key Response
-                                if (this.peerId == peerId)
-                                {
-                                    byte[] payload = message.Skip(11).ToArray();
-
-                                    byte messageId = payload[0];
-
-                                    if (messageId == (byte)KmmMessageType.MODIFY_KEY_CMD)
-                                    {
-                                        KmmModifyKey modifyKey = new KmmModifyKey();
-                                        modifyKey.Decode(payload);
-
-                                        FireKeyResponse(new KeyResponseEvent(messageId, modifyKey, message));
-                                    }
-                                    else
-                                    {
-                                        Log(LogLevel.WARNING, $"Unknown KEY_RSP Message ID: {messageId}");
-                                    }
-                                }
+                            case Constants.NET_FUNC_TRANSFER when fneHeader.SubFunction == Constants.NET_TRANSFER_SUBFUNC_PATCH_STATUS:
+                                HandlePatchStatusMessage(message);
                                 break;
 
                             default:
@@ -1088,7 +1791,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    client.Connect(masterEndpoint);
+                    TryReconnect(clientTraffic, masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1099,6 +1802,14 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
                             RotateMasterEndpont();
 
@@ -1107,7 +1818,174 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            client.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
+                            break;
+                        default:
+                            Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
+                            break;
+                    }
+                }
+
+                if (ct.IsCancellationRequested)
+                    abortListening = true;
+            }
+        }
+
+
+        /// <summary>
+        /// Internal UDP listen metadata routine.
+        /// </summary>
+        private async void ListenMetadata()
+        {
+            CancellationToken ct = listenMetadataCancelToken.Token;
+            ct.ThrowIfCancellationRequested();
+
+            while (!abortListening)
+            {
+                try
+                {
+                    UdpFrame frame = await clientMetadata.Receive();
+                    if (RawPacketTrace)
+                        Log(LogLevel.DEBUG, $"Metadata Network Received (from {frame.Endpoint}) -- {FneUtils.HexDump(frame.Message, 0)}");
+
+                    // decode RTP frame
+                    if (frame.Message.Length <= 0)
+                        continue;
+
+                    RtpHeader rtpHeader;
+                    RtpFNEHeader fneHeader;
+                    int messageLength = 0;
+                    byte[] message = ReadFrame(frame, out messageLength, out rtpHeader, out fneHeader);
+                    if (message == null)
+                    {
+                        Log(LogLevel.ERROR, $"({systemName}) Malformed packet (from {frame.Endpoint}); failed to decode RTP frame");
+                        continue;
+                    }
+
+                    if (message.Length < 1)
+                    {
+                        Log(LogLevel.WARNING, $"({systemName}) Malformed packet (from {frame.Endpoint}) -- {FneUtils.HexDump(message, 0)}");
+                        continue;
+                    }
+
+                    // validate frame endpoint (traffic or metadata channel)
+                    if (frame.Endpoint.ToString() == metadataEndpoint.ToString())
+                    {
+                        uint peerId = fneHeader.PeerID;
+
+                        if (HandleRadioAliasSyncFrame(peerId, fneHeader.StreamID, fneHeader.Function, message))
+                            continue;
+
+                        if (streamId != fneHeader.StreamID)
+                            pktSeq(true);
+
+                        // update current peer stream ID
+                        streamId = fneHeader.StreamID;
+
+                        // see if the peer is defining its own frame handler, if it is try to handle the frame there
+                        if (NetworkFrameHandler != null)
+                        {
+                            if (NetworkFrameHandler(frame, peerId, streamId))
+                                continue;
+                        }
+
+                        // process incoming message frame opcodes
+                        switch (fneHeader.Function)
+                        {
+                            case Constants.NET_FUNC_KEYS_INVENTORY:
+                                {
+                                    if (this.peerId == peerId)
+                                    {
+                                        PacketBuffer packetBuffer;
+                                        lock (keyInventoryLock)
+                                        {
+                                            if (!keyInventoryPackets.TryGetValue(streamId, out packetBuffer))
+                                            {
+                                                packetBuffer = new PacketBuffer(true, "Remote EKC, Key Inventory");
+                                                keyInventoryPackets[streamId] = packetBuffer;
+                                            }
+                                        }
+
+                                        try
+                                        {
+                                            if (packetBuffer.Decode(message, out byte[] payload, out uint payloadLength))
+                                            {
+                                                if (payload != null && payloadLength > 0)
+                                                    FireKeyInventory(new KeyInventoryEvent(peerId, streamId, payload, payloadLength));
+
+                                                lock (keyInventoryLock)
+                                                {
+                                                    packetBuffer.Clear();
+                                                    keyInventoryPackets.Remove(streamId);
+                                                }
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Log(LogLevel.ERROR, $"({systemName}) KEYS_INVENTORY stream {streamId} decode failure: {ex.Message}");
+                                            lock (keyInventoryLock)
+                                            {
+                                                packetBuffer.Clear();
+                                                keyInventoryPackets.Remove(streamId);
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+
+                            case Constants.NET_FUNC_TRANSFER:
+                                if (fneHeader.SubFunction == Constants.NET_TRANSFER_SUBFUNC_PATCH_STATUS)
+                                {
+                                    HandlePatchStatusMessage(message);
+                                    break;
+                                }
+
+                                if (UserPacketHandler != null)
+                                {
+                                    UserPacketHandler(frame, peerId, streamId, rtpHeader, fneHeader, message);
+                                    break;
+                                }
+
+                                Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
+                                break;
+
+                            default:
+                                // are we handling anything else with a user handler?
+                                if (UserPacketHandler != null)
+                                {
+                                    UserPacketHandler(frame, peerId, streamId, rtpHeader, fneHeader, message);
+                                    break;
+                                }
+
+                                Log(LogLevel.ERROR, $"({systemName}) Unknown opcode {fneHeader.Function.ToString("X2")} / {fneHeader.SubFunction.ToString("X2")} -- {FneUtils.HexDump(message, 0)}");
+                                break;
+                        }
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    Log(LogLevel.WARNING, $"({systemName}) Metadata receiver entered invalid state; reconnecting metadata socket to {metadataEndpoint}");
+                    TryReconnect(clientMetadata, metadataEndpoint);
+                }
+                catch (SocketException se)
+                {
+                    // what kind of socket error do we have?
+                    switch (se.SocketErrorCode)
+                    {
+                        case SocketError.NotConnected:
+                        case SocketError.ConnectionReset:
+                        case SocketError.ConnectionAborted:
+                        case SocketError.ConnectionRefused:
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
+                            Log(LogLevel.WARNING, $"({systemName}) Metadata socket error {se.SocketErrorCode}; reconnecting metadata socket to {metadataEndpoint}");
+                            TryReconnect(clientMetadata, metadataEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");
@@ -1133,6 +2011,7 @@ namespace fnecore
                     // if we're not connected, zero out the connection stats and send a login request to the master
                     if (info.State == ConnectionState.WAITING_LOGIN)
                     {
+                        ClearRadioAliasSyncRequests();
                         // reset states
                         PingsSent = 0;
                         PingsAcked = 0;
@@ -1144,7 +2023,7 @@ namespace fnecore
                         byte[] res = new byte[8];
                         FneUtils.StringToBytes(Constants.TAG_REPEATER_LOGIN, res, 0, 4);
                         FneUtils.WriteBytes(peerId, ref res, 4);
-                        SendMaster(CreateOpcode(Constants.NET_FUNC_RPTL), res);
+                        SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_RPTL), res);
 
                         Log(LogLevel.INFO, $"({systemName}) Sending login request to MASTER {masterEndpoint}");
                     }
@@ -1162,13 +2041,13 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            client.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                         }
                         else
                         {
                             // send message to master
                             byte[] res = new byte[1];
-                            SendMaster(CreateOpcode(Constants.NET_FUNC_PING), res, Constants.RtpCallEndSeq);
+                            SendMasterTraffic(CreateOpcode(Constants.NET_FUNC_PING), res, Constants.RtpCallEndSeq);
 
                             PingsSent++;
                             Log(LogLevel.DEBUG, $"({systemName}) RPTPING sent to MASTER {masterEndpoint}; pings since connected {PingsSent}");
@@ -1185,7 +2064,7 @@ namespace fnecore
                     PingsAcked = 0;
                     info.State = ConnectionState.WAITING_LOGIN;
 
-                    client.Connect(masterEndpoint);
+                    TryReconnect(clientTraffic, masterEndpoint);
                 }
                 catch (SocketException se)
                 {
@@ -1196,6 +2075,14 @@ namespace fnecore
                         case SocketError.ConnectionReset:
                         case SocketError.ConnectionAborted:
                         case SocketError.ConnectionRefused:
+                        // network lost (interface down, route lost, address changed); reconnect rather than abort
+                        case SocketError.NetworkDown:
+                        case SocketError.NetworkUnreachable:
+                        case SocketError.NetworkReset:
+                        case SocketError.HostDown:
+                        case SocketError.HostUnreachable:
+                        case SocketError.AddressNotAvailable:
+                        case SocketError.TimedOut:
                             Log(LogLevel.ERROR, $"({systemName}) Not connected or lost connection to {masterEndpoint}; reconnecting...");
                             RotateMasterEndpont();
 
@@ -1204,7 +2091,7 @@ namespace fnecore
                             PingsAcked = 0;
                             info.State = ConnectionState.WAITING_LOGIN;
 
-                            client.Connect(masterEndpoint);
+                            TryReconnect(clientTraffic, masterEndpoint);
                             break;
                         default:
                             Log(LogLevel.FATAL, $"({systemName}) SOCKET ERROR: {se.SocketErrorCode}; {se.Message}");

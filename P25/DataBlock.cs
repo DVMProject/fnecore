@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2023 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2023,2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -89,13 +89,52 @@ namespace fnecore.P25
 
             if (Format == P25Defines.PDU_FMT_CONFIRMED) {
                 // decode 3/4 rate Trellis
-                bool valid = trellis.Decode34(pduData, ref buffer);
-                if (!valid) {
+                byte[] candidates = new byte[Trellis.TRELLIS_34_MAX_LIST_PATHS * Trellis.TRELLIS_34_PAYLOAD_LENGTH_BYTES];
+                bool truncated;
+                int candidateCount = trellis.Decode34List(pduData, ref candidates, Trellis.TRELLIS_34_MAX_LIST_PATHS, out truncated);
+                if (candidateCount == 0) {
+                    return false;
+                }
+
+                bool valid = false;
+                ushort crc = 0;
+                ushort calculated = 0;
+                int selected = 0;
+                for (int candidate = 0; candidate < candidateCount; candidate++)
+                {
+                    byte[] candidatePayload = new byte[Trellis.TRELLIS_34_PAYLOAD_LENGTH_BYTES];
+                    Buffer.BlockCopy(candidates, candidate * Trellis.TRELLIS_34_PAYLOAD_LENGTH_BYTES,
+                        candidatePayload, 0, candidatePayload.Length);
+
+                    ushort candidateCrc = (ushort)(((candidatePayload[0] & 0x01U) << 8) + candidatePayload[1]);
+                    ushort candidateCalculated = CRC.Crc9(candidatePayload, 144);
+                    bool candidateValid = ((candidateCrc ^ candidateCalculated) == 0) ||
+                        ((candidateCrc ^ candidateCalculated) == 0x1FFU);
+                    if (candidate == 0 || candidateValid)
+                    {
+                        selected = candidate;
+                        crc = candidateCrc;
+                        calculated = candidateCalculated;
+                    }
+
+                    if (candidateValid)
+                    {
+                        valid = true;
+                        break;
+                    }
+                }
+
+                Buffer.BlockCopy(candidates, selected * Trellis.TRELLIS_34_PAYLOAD_LENGTH_BYTES,
+                    buffer, 0, Trellis.TRELLIS_34_PAYLOAD_LENGTH_BYTES);
+                if (!valid)
+                {
+                    if (truncated)
+                        System.Diagnostics.Trace.WriteLine($"P25_DUID_PDU, fmt = {Format}, Trellis candidate list truncated before CRC-9 match");
+                    System.Diagnostics.Trace.WriteLine($"P25_DUID_PDU, fmt = {Format}, invalid crc = {crc} != {calculated}");
                     return false;
                 }
 
                 SerialNo = (byte)((buffer[0] & 0xFEU) >> 1);                        // Confirmed Data Serial No.
-                ushort crc = (ushort)(((buffer[0] & 0x01U) << 8) + buffer[1]);      // CRC-9 Check Sum
 
                 data = new byte[P25Defines.P25_PDU_CONFIRMED_DATA_LENGTH_BYTES];
 
@@ -112,10 +151,8 @@ namespace fnecore.P25
                         data[i] = buffer[i + 2];                                    // Payload Data
                 }
 
-                // compute CRC-9 for the packet
-                ushort calculated = CRC.Crc9(buffer, 144);
-                if (((crc ^ calculated) != 0) && ((crc ^ calculated) != 0x1FFU))
-                    System.Diagnostics.Trace.WriteLine($"P25_DUID_PDU, fmt = {Format}, invalid crc = {crc} != {calculated}");
+                if (selected != 0)
+                    System.Diagnostics.Trace.WriteLine($"P25_DUID_PDU, fmt = {Format}, Trellis tie resolved by CRC-9, candidate {selected + 1} of {candidateCount}");
             }
             else if ((Format == P25Defines.PDU_FMT_UNCONFIRMED) || (Format == P25Defines.PDU_FMT_RSP) || (Format == P25Defines.PDU_FMT_AMBT))
             {

@@ -23,7 +23,9 @@ namespace fnecore.DMR
     /// </summary>
     public sealed class FullLC
     {
-        private static BPTC19696 bptc = new BPTC19696();
+        // BPTC keeps mutable scratch buffers; concurrent calls must not share them.
+        [ThreadStatic] private static BPTC19696 threadBptc;
+        private static BPTC19696 bptc => threadBptc ?? (threadBptc = new BPTC19696());
 
         private static readonly byte[] VOICE_LC_HEADER_CRC_MASK = new byte[3] { 0x96, 0x96, 0x96 };
         private static readonly byte[] TERMINATOR_WITH_LC_CRC_MASK = new byte[3] { 0x99, 0x99, 0x99 };

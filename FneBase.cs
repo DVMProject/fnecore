@@ -7,7 +7,7 @@
 * @package DVM / Fixed Network Equipment Core Library
 * @license AGPLv3 License (https://opensource.org/licenses/AGPL-3.0)
 *
-*   Copyright (C) 2022-2025 Bryan Biedenkapp, N2PLL
+*   Copyright (C) 2022-2026 Bryan Biedenkapp, N2PLL
 *
 */
 
@@ -41,19 +41,6 @@ namespace fnecore
         /// Transmit Frequency
         /// </summary>
         public uint TxFrequency;
-
-        /// <summary>
-        /// Exteral Peer
-        /// </summary>
-        public bool ExternalPeer;
-        /// <summary>
-        /// Conventional Peer
-        /// </summary>
-        public bool ConventionalPeer;
-        /// <summary>
-        /// System View
-        /// </summary>
-        public bool SysView;
 
         /// <summary>
         /// Software Identifier
@@ -115,6 +102,28 @@ namespace fnecore
         /// REST API Port
         /// </summary>
         public int Port;
+
+        /// <summary>
+        /// Peer Connection Class
+        /// </summary>
+        public PeerConnectionClass PeerClass = PeerConnectionClass.PEER_CONN_CLASS_STANDARD;
+
+        /*
+        ** [deprecated] bryanb: this shit will need to be removed for R05A06 core
+        */
+
+        /// <summary>
+        /// Exteral Peer [DEPRECATED]
+        /// </summary>
+        public bool ExternalPeer;
+        /// <summary>
+        /// Conventional Peer [DEPRECATED]
+        /// </summary>
+        public bool ConventionalPeer;
+        /// <summary>
+        /// System View [DEPRECATED]
+        /// </summary>
+        public bool SysView;
 
         /*
         ** Methods
@@ -906,6 +915,97 @@ namespace fnecore
     }
 
     /// <summary>
+    /// Event called when a radio alias sync transfer is received and reassembled.
+    /// </summary>
+    public class RadioAliasSyncEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID associated with the transfer.
+        /// </summary>
+        public uint PeerId { get; set; }
+
+        /// <summary>
+        /// Stream ID associated with the transfer.
+        /// </summary>
+        public uint StreamId { get; set; }
+
+        /// <summary>
+        /// Reassembled radio alias sync payload.
+        /// </summary>
+        public byte[] Data { get; set; }
+
+        /// <summary>
+        /// Length of the reassembled payload.
+        /// </summary>
+        public uint Length { get; set; }
+
+        /*
+        ** Methods
+        */
+        public RadioAliasSyncEvent(uint peerId, uint streamId, byte[] data, uint length) : base()
+        {
+            this.PeerId = peerId;
+            this.StreamId = streamId;
+            this.Data = data;
+            this.Length = length;
+        }
+    }
+
+    /// <summary>
+    /// Event called when a requested radio alias transfer fails.
+    /// </summary>
+    public class RadioAliasSyncFailedEvent : EventArgs
+    {
+        public uint PeerId { get; }
+        public uint StreamId { get; }
+        public Exception Error { get; }
+
+        public RadioAliasSyncFailedEvent(uint peerId, uint streamId, Exception error)
+        {
+            PeerId = peerId;
+            StreamId = streamId;
+            Error = error;
+        }
+    }
+
+    /// <summary>
+    /// Event called when a key inventory transfer is received and reassembled.
+    /// </summary>
+    public class KeyInventoryEvent : EventArgs
+    {
+        /// <summary>
+        /// Peer ID associated with the transfer.
+        /// </summary>
+        public uint PeerId { get; set; }
+
+        /// <summary>
+        /// Stream ID associated with the transfer.
+        /// </summary>
+        public uint StreamId { get; set; }
+
+        /// <summary>
+        /// Reassembled key inventory payload.
+        /// </summary>
+        public byte[] Data { get; set; }
+
+        /// <summary>
+        /// Length of the reassembled payload.
+        /// </summary>
+        public uint Length { get; set; }
+
+        /*
+        ** Methods
+        */
+        public KeyInventoryEvent(uint peerId, uint streamId, byte[] data, uint length) : base()
+        {
+            this.PeerId = peerId;
+            this.StreamId = streamId;
+            this.Data = data;
+            this.Length = length;
+        }
+    }
+
+    /// <summary>
     /// This class implements some base functionality for all other FNE network classes.
     /// </summary>
     public abstract class FneBase
@@ -1038,9 +1138,24 @@ namespace fnecore
         public Action<uint> PeerDisconnected = null;
 
         /// <summary>
+        /// Event action thats called when a radio alias sync transfer is received.
+        /// </summary>
+        public event EventHandler<RadioAliasSyncEvent> RadioAliasSync;
+
+        /// <summary>
+        /// Event action called when an alias request is rejected, malformed, or disconnected.
+        /// </summary>
+        public event EventHandler<RadioAliasSyncFailedEvent> RadioAliasSyncFailed;
+
+        /// <summary>
         /// Event action thats called when a key response is received
         /// </summary>
         public event EventHandler<KeyResponseEvent> KeyResponse;
+
+        /// <summary>
+        /// Event action thats called when a key inventory transfer is received.
+        /// </summary>
+        public event EventHandler<KeyInventoryEvent> KeyInventory;
 
         /// <summary>
         /// Callback action that handles internal logging.
@@ -1122,6 +1237,9 @@ namespace fnecore
             byte level = (byte)logLevel;
             if (level <= (byte)LogLevel)
                 Logger(logLevel, message);
+#if DEBUG || TRACE
+            System.Diagnostics.Trace.WriteLine($"{logLevel} {message}");
+#endif
         }
 
         /// <summary>
@@ -1134,6 +1252,7 @@ namespace fnecore
         protected byte[] ReadFrame(UdpFrame frame, out int messageLength, out RtpHeader rtpHeader, out RtpFNEHeader fneHeader)
         {
             int length = frame.Message.Length;
+            int headerLength = (int)(Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes + Constants.RtpFNEHeaderLengthBytes);
             messageLength = -1;
             rtpHeader = null;
             fneHeader = null;
@@ -1141,10 +1260,10 @@ namespace fnecore
             // read message from socket
             if (length > 0)
             {
-                if (length < Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes)
+                if (length < headerLength)
                 {
                     Log(LogLevel.ERROR, $"Message received from network is malformed! " +
-                        $"{Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes} bytes != {frame.Message.Length} bytes");
+                        $"expected at least {headerLength} bytes, received {frame.Message.Length} bytes");
                     return null;
                 }
 
@@ -1180,10 +1299,17 @@ namespace fnecore
                 }
 
                 // copy message
+                uint availableMessageLength = (uint)(length - headerLength);
+                if (fneHeader.MessageLength > availableMessageLength)
+                {
+                    Log(LogLevel.ERROR, $"Message received from network is malformed! " +
+                        $"payload length {fneHeader.MessageLength} exceeds {availableMessageLength} available bytes");
+                    return null;
+                }
+
                 messageLength = (int)fneHeader.MessageLength;
                 byte[] message = new byte[messageLength];
-                Buffer.BlockCopy(frame.Message, (int)(Constants.RtpHeaderLengthBytes + Constants.RtpExtensionHeaderLengthBytes + Constants.RtpFNEHeaderLengthBytes), 
-                    message, 0, messageLength);
+                Buffer.BlockCopy(frame.Message, headerLength, message, 0, messageLength);
 
                 ushort calc = CRC.CreateCRC16(message, (uint)(messageLength * 8));
                 if (calc != fneHeader.CRC)
@@ -1340,6 +1466,24 @@ namespace fnecore
         }
 
         /// <summary>
+        /// Helper to fire the radio alias sync event.
+        /// </summary>
+        /// <param name="e"></param>
+        protected void FireRadioAliasSync(RadioAliasSyncEvent e)
+        {
+            if (RadioAliasSync != null)
+                RadioAliasSync.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the radio alias failure event.
+        /// </summary>
+        protected void FireRadioAliasSyncFailed(RadioAliasSyncFailedEvent e)
+        {
+            RadioAliasSyncFailed?.Invoke(this, e);
+        }
+
+        /// <summary>
         /// Helper to fire the key response event
         /// </summary>
         /// <param name="e"></param>
@@ -1347,6 +1491,16 @@ namespace fnecore
         {
             if (KeyResponse != null)
                 KeyResponse.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Helper to fire the key inventory event.
+        /// </summary>
+        /// <param name="e"></param>
+        protected void FireKeyInventory(KeyInventoryEvent e)
+        {
+            if (KeyInventory != null)
+                KeyInventory.Invoke(this, e);
         }
     } // public abstract class FneBase
 } // namespace fnecore
