@@ -538,7 +538,8 @@ namespace fnecore
         /// </summary>
         /// <param name="callData"></param>
         /// <param name="grantDemand"></param>
-        public virtual void SendP25TDU(RemoteCallData callData, bool grantDemand = false)
+        /// <param name="encrypted"></param>
+        public virtual void SendP25TDU(RemoteCallData callData, bool grantDemand = false, bool encrypted = false)
         {
             byte[] payload = new byte[200];
             CreateP25MessageHdr((byte)P25DUID.TDU, callData, ref payload);
@@ -546,7 +547,13 @@ namespace fnecore
 
             // if this TDU is demanding a grant, set the grant demand control bit
             if (grantDemand)
+            {
                 payload[14U] |= 0x80;
+
+                // if this grant demand is for an encrypted call, set the encryption control bit
+                if (encrypted)
+                    payload[14U] |= 0x08;
+            }
 
             FnePeer peer = (FnePeer)fne;
             ushort pktSeq = peer.pktSeq(true);
